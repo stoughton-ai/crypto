@@ -415,7 +415,7 @@ export default function Home() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="fixed bottom-8 right-8 z-[150]"
+            className={cn("fixed bottom-8 z-[150]", isMobile ? "left-1/2 -translate-x-1/2" : "right-8")}
           >
             <div className={cn(
               "glass rounded-2xl p-6 shadow-2xl border-blue-500/30 flex items-center gap-4 min-w-[320px]",
@@ -911,7 +911,7 @@ export default function Home() {
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="glass rounded-2xl p-4 flex items-center gap-3 border border-blue-500/30 bg-blue-500/5"
+                  className="glass rounded-2xl p-4 flex items-center gap-3 border border-blue-500/30 bg-blue-500/5 mb-8"
                 >
                   <Info className="text-blue-400 shrink-0" size={24} />
                   <div className="text-left">
