@@ -799,7 +799,9 @@ export default function Home() {
                 <Users size={12} className="text-blue-400" />
               )}
             </div>
-            <span className="text-xs font-bold text-slate-300 truncate max-w-[80px] md:max-w-none">{user.displayName}</span>
+            <span className="text-xs font-bold text-slate-300 truncate max-w-[80px] md:max-w-none">
+              {user.displayName ? user.displayName.split(' ')[0] : 'User'}
+            </span>
             <button
               onClick={logout}
               className="text-[10px] uppercase font-black text-slate-500 hover:text-red-400 transition-colors ml-1 md:ml-2 flex-shrink-0"
@@ -836,6 +838,17 @@ export default function Home() {
       </div>
 
       <div className="text-center mb-8 md:mb-12">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="mb-6 flex justify-center"
+        >
+          <img
+            src="/traffic-light-header.png"
+            alt="Crypto Traffic Light"
+            className="h-24 md:h-32 object-contain drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]"
+          />
+        </motion.div>
         <motion.h1
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
