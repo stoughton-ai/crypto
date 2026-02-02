@@ -62,6 +62,14 @@ export default function Home() {
 
   // Auto-Retry State
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 640);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -846,7 +854,7 @@ export default function Home() {
         <div className="relative group">
           <input
             type="text"
-            placeholder="Enter Ticker (e.g. BTC, ETH, SOL)"
+            placeholder={isMobile ? "Enter Ticker (e.g. BTC)" : "Enter Ticker (e.g. BTC, ETH, SOL)"}
             value={ticker}
             onChange={(e) => setTicker(e.target.value.toUpperCase())}
             className="w-full bg-slate-900/50 border border-slate-700 rounded-2xl py-4 px-6 pl-12 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-white placeholder-slate-500"
