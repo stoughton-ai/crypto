@@ -905,6 +905,22 @@ export default function Home() {
             {/* Price & Signal Overview */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
+
+              {/* Mobile Only: Report Ready Info */}
+              {isMobile && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="glass rounded-2xl p-4 flex items-center gap-3 border border-blue-500/30 bg-blue-500/5"
+                >
+                  <Info className="text-blue-400 shrink-0" size={24} />
+                  <div className="text-left">
+                    <h4 className="font-bold text-white text-sm">Analysis Complete</h4>
+                    <p className="text-xs text-slate-400">Your full intelligence report is ready below.</p>
+                  </div>
+                </motion.div>
+              )}
+
               {/* Traffic Light Signal */}
               <div className="glass rounded-3xl p-8 flex flex-col items-center justify-center text-center">
                 <h3 className="text-slate-400 font-medium mb-6 flex items-center gap-2">
