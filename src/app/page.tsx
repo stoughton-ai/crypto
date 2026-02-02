@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices } from "./actions";
+import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, getVerifiedPrices } from "./actions";
 import { type CryptoAnalysisResult } from "@/lib/gemini";
 import { useAuth } from "@/context/AuthContext";
 import { fetchLibrary, saveToLibrary, deleteReport, migrateLegacyLibrary, clearLibrary, type LibraryReport } from "@/services/libraryService";
 import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, type PortfolioItem, type PortfolioSnapshot } from "@/services/portfolioService";
 import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
-import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins } from "lucide-react";
+import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -59,6 +59,7 @@ export default function Home() {
   const [isAddingAsset, setIsAddingAsset] = useState(false);
   const [newAsset, setNewAsset] = useState({ ticker: "", amount: "", price: "" });
   const [lastLoggedValue, setLastLoggedValue] = useState<number | null>(null);
+  const [isRevaluing, setIsRevaluing] = useState(false);
 
   // Auto-Retry State
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
@@ -270,6 +271,31 @@ export default function Home() {
     });
   };
 
+  const handleRevaluePortfolio = async () => {
+    if (!user || portfolioItems.length === 0) return;
+    setIsRevaluing(true);
+    try {
+      const tickers = portfolioItems.map(p => p.ticker);
+      const verifiedPrices = await getVerifiedPrices(tickers);
+      setPortfolioPrices(prev => ({ ...prev, ...verifiedPrices }));
+
+      // Update snapshot immediately with confirmed values
+      const totalValue = portfolioItems.reduce((acc, item) => acc + (item.amount * (verifiedPrices[item.ticker] || item.averagePrice)), 0);
+      await recordPortfolioSnapshot(user.uid, totalValue);
+      await loadPortfolioHistory();
+    } catch (e) {
+      console.error("Revaluation failed", e);
+      setModalConfig({
+        isOpen: true,
+        title: "Revaluation Failed",
+        message: "Could not verify all asset prices. Please try again later.",
+        type: "alert"
+      });
+    } finally {
+      setIsRevaluing(false);
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -410,7 +436,7 @@ export default function Home() {
 
       {/* Progress Notification */}
       <AnimatePresence>
-        {(loading || retryCountdown !== null) && (
+        {(loading || retryCountdown !== null || isRevaluing) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -427,12 +453,14 @@ export default function Home() {
               </div>
               <div>
                 <h4 className="font-bold text-white text-sm">
-                  {retryCountdown !== null ? "Intelligence Refinement" : "AI Analyst at Work"}
+                  {retryCountdown !== null ? "Intelligence Refinement" : isRevaluing ? "Verifying Asset Valuations" : "AI Analyst at Work"}
                 </h4>
                 <p className="text-xs text-slate-400 animate-pulse">
                   {retryCountdown !== null
                     ? `Low confidence data detected. Retrying in ${retryCountdown}s...`
-                    : "Searching live data & calculating 60/40 signals..."}
+                    : isRevaluing
+                      ? "Cross-referencing Binance, CoinGecko & Kraken for confirmed pricing..."
+                      : "Searching live data & calculating 60/40 signals..."}
                 </p>
               </div>
             </div>
@@ -472,7 +500,15 @@ export default function Home() {
               </div>
 
               {/* Portfolio Stats */}
-              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-3xl p-6 mb-8">
+              <div className="relative bg-emerald-500/5 border border-emerald-500/20 rounded-3xl p-6 mb-8 group">
+                <button
+                  onClick={handleRevaluePortfolio}
+                  disabled={isRevaluing}
+                  className="absolute top-4 right-4 p-2 rounded-xl bg-slate-900/50 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all disabled:opacity-50 disabled:animate-pulse"
+                  title="Force Revaluation (Confirmed Data)"
+                >
+                  <RefreshCw size={16} className={cn(isRevaluing && "animate-spin")} />
+                </button>
                 <p className="text-xs font-bold uppercase tracking-widest text-emerald-500/60 mb-1">Total Balance</p>
                 <div className="text-3xl font-black text-white font-mono">
                   ${portfolioItems.reduce((acc, item) => acc + (item.amount * (portfolioPrices[item.ticker] || item.averagePrice)), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

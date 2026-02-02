@@ -293,6 +293,23 @@ export async function getSimplePrices(tickers: string[]) {
 }
 
 /**
+ * Robustly fetch prices for portfolio revaluation using the multi-source verification engine.
+ */
+export async function getVerifiedPrices(tickers: string[]) {
+  const results: Record<string, number> = {};
+
+  // limit concurrency to avoid rate limits if necessary, but 5-10 should be fine
+  await Promise.all(tickers.map(async (ticker) => {
+    const data = await getRealTimePrice(ticker);
+    if (data) {
+      results[ticker.toUpperCase()] = data.price;
+    }
+  }));
+
+  return results;
+}
+
+/**
  * Cleanup helper: deletes local file after migration.
  */
 export async function deleteLegacyFile() {
