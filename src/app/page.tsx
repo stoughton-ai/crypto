@@ -5,9 +5,9 @@ import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, get
 import { type CryptoAnalysisResult } from "@/lib/gemini";
 import { useAuth } from "@/context/AuthContext";
 import { fetchLibrary, saveToLibrary, deleteReport, migrateLegacyLibrary, clearLibrary, type LibraryReport } from "@/services/libraryService";
-import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, type PortfolioItem, type PortfolioSnapshot } from "@/services/portfolioService";
+import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, clearPortfolio, recordTrade, fetchRealizedTrades, type PortfolioItem, type PortfolioSnapshot, type RealizedTrade } from "@/services/portfolioService";
 import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
-import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw } from "lucide-react";
+import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -56,8 +56,12 @@ export default function Home() {
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
   const [portfolioPrices, setPortfolioPrices] = useState<Record<string, number>>({});
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
+  const [realizedTrades, setRealizedTrades] = useState<RealizedTrade[]>([]);
   const [isAddingAsset, setIsAddingAsset] = useState(false);
-  const [newAsset, setNewAsset] = useState({ ticker: "", amount: "", price: "" });
+  const [editingAsset, setEditingAsset] = useState<PortfolioItem | null>(null);
+  const [sellingAsset, setSellingAsset] = useState<PortfolioItem | null>(null);
+  const [newAsset, setNewAsset] = useState({ ticker: "", amount: "", price: "", date: "" });
+  const [sellData, setSellData] = useState({ amount: "", price: "", date: "" });
   const [lastLoggedValue, setLastLoggedValue] = useState<number | null>(null);
   const [isRevaluing, setIsRevaluing] = useState(false);
 
@@ -77,6 +81,7 @@ export default function Home() {
       loadLibrary();
       loadPortfolio();
       loadPortfolioHistory();
+      loadRealizedTrades();
     }
   }, [user]);
 
@@ -155,6 +160,12 @@ export default function Home() {
     setPortfolioHistory(data);
   };
 
+  const loadRealizedTrades = async () => {
+    if (!user) return;
+    const data = await fetchRealizedTrades(user.uid);
+    setRealizedTrades(data);
+  };
+
   const updatePortfolioPrices = async () => {
     const tickers = portfolioItems.map(item => item.ticker);
     if (tickers.length === 0) return;
@@ -162,18 +173,32 @@ export default function Home() {
     setPortfolioPrices(prices);
   };
 
-  const handleAddAsset = async (e: React.FormEvent) => {
+  const handleSaveAsset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !newAsset.ticker || !newAsset.amount || !newAsset.price) return;
 
     try {
-      await addToPortfolio(
-        user.uid,
-        newAsset.ticker,
-        parseFloat(newAsset.amount),
-        parseFloat(newAsset.price)
-      );
-      setNewAsset({ ticker: "", amount: "", price: "" });
+      if (editingAsset) {
+        // Update existing
+        await updatePortfolioItem(editingAsset.id, {
+          ticker: newAsset.ticker,
+          amount: parseFloat(newAsset.amount),
+          averagePrice: parseFloat(newAsset.price),
+          tradeDate: newAsset.date ? new Date(newAsset.date).toISOString() : editingAsset.tradeDate
+        });
+      } else {
+        // Create new
+        await addToPortfolio(
+          user.uid,
+          newAsset.ticker,
+          parseFloat(newAsset.amount),
+          parseFloat(newAsset.price),
+          newAsset.date ? new Date(newAsset.date).toISOString() : new Date().toISOString()
+        );
+      }
+
+      setNewAsset({ ticker: "", amount: "", price: "", date: "" });
+      setEditingAsset(null);
       setIsAddingAsset(false);
       loadPortfolio();
     } catch (err) {
@@ -181,10 +206,87 @@ export default function Home() {
       setModalConfig({
         isOpen: true,
         title: "System Error",
-        message: "Failed to add asset to ledger. Please check your inputs and try again.",
+        message: "Failed to save asset. Please check your inputs.",
         type: "alert"
       });
     }
+  };
+
+  const startEditing = (item: PortfolioItem) => {
+    setEditingAsset(item);
+    setNewAsset({
+      ticker: item.ticker,
+      amount: item.amount.toString(),
+      price: item.averagePrice.toString(),
+      date: item.tradeDate ? new Date(item.tradeDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+    });
+    setIsAddingAsset(true);
+    setSellingAsset(null);
+  };
+
+  const startSelling = (item: PortfolioItem) => {
+    setSellingAsset(item);
+    const currentPrice = portfolioPrices[item.ticker];
+    setSellData({
+      amount: item.amount.toString(),
+      price: currentPrice ? currentPrice.toString() : "",
+      date: new Date().toISOString().split('T')[0]
+    });
+    setIsAddingAsset(false);
+    setEditingAsset(null);
+  };
+
+  const handleSellAsset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !sellingAsset || !sellData.amount || !sellData.price) return;
+
+    const sellAmt = parseFloat(sellData.amount);
+    const sellPx = parseFloat(sellData.price);
+
+    if (sellAmt > sellingAsset.amount) {
+      setModalConfig({
+        isOpen: true, title: "Invalid Amount", message: "You cannot sell more than you own.", type: 'alert'
+      });
+      return;
+    }
+
+    try {
+      // 1. Record Trade
+      await recordTrade(user.uid, sellingAsset.ticker, sellAmt, sellPx, sellingAsset.averagePrice, sellData.date);
+
+      // 2. Update Portfolio
+      if (sellAmt >= sellingAsset.amount) {
+        // Full Sell
+        await removeFromPortfolio(sellingAsset.id);
+      } else {
+        // Partial Sell
+        await updatePortfolioItem(sellingAsset.id, {
+          amount: sellingAsset.amount - sellAmt
+        });
+      }
+
+      setSellingAsset(null);
+      setSellData({ amount: "", price: "", date: "" });
+      loadPortfolio();
+      loadRealizedTrades();
+    } catch (e) {
+      console.error(e);
+      setModalConfig({ isOpen: true, title: "Error", message: "Failed to process sale.", type: "alert" });
+    }
+  };
+
+  const handleClearPortfolio = async () => {
+    if (!user || portfolioItems.length === 0) return;
+    setModalConfig({
+      isOpen: true,
+      title: "Clear Entire Portfolio",
+      message: "Are you sure you want to delete ALL assets from your portfolio tracking? This cannot be undone.",
+      type: "danger",
+      onConfirm: async () => {
+        await clearPortfolio(user.uid);
+        loadPortfolio();
+      }
+    });
   };
 
   const handleRemoveAsset = async (id: string) => {
@@ -499,6 +601,18 @@ export default function Home() {
                 </button>
               </div>
 
+              {/* Portfolio Actions: Clear All */}
+              {portfolioItems.length > 0 && (
+                <div className="flex justify-end mb-4 px-2">
+                  <button
+                    onClick={handleClearPortfolio}
+                    className="text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1 uppercase tracking-widest font-bold opacity-60 hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 size={12} /> Clear Portfolio
+                  </button>
+                </div>
+              )}
+
               {/* Portfolio Stats */}
               <div className="relative bg-emerald-500/5 border border-emerald-500/20 rounded-3xl p-6 mb-8 group">
                 <button
@@ -523,6 +637,19 @@ export default function Home() {
                   </div>
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">All Time PNL</span>
                 </div>
+                {/* Realized PNL Display */}
+                {realizedTrades.length > 0 && (
+                  <div className="flex items-center gap-2 mt-4 pt-4 border-t border-emerald-500/20">
+                    <div className={cn(
+                      "flex items-center gap-1 text-sm font-bold",
+                      realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0) >= 0 ? "text-blue-400" : "text-red-400"
+                    )}>
+                      <DollarSign size={16} />
+                      ${realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Realized Profits</span>
+                  </div>
+                )}
               </div>
 
               {/* History Chart */}
@@ -596,38 +723,69 @@ export default function Home() {
                       const pnlPct = currentPrice ? ((currentPrice - item.averagePrice) / item.averagePrice) * 100 : 0;
 
                       return (
-                        <div key={item.id} className="glass p-4 rounded-2xl border-white/5 hover:border-emerald-500/30 transition-all group relative">
-                          <button
-                            onClick={() => handleRemoveAsset(item.id)}
-                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-red-500/10 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-
-                          <div className="flex justify-between items-start mb-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center font-bold text-xs">
-                                {item.ticker.slice(0, 2)}
+                        <div key={item.id} className="glass rounded-2xl border-white/5 hover:border-emerald-500/30 transition-all group overflow-hidden">
+                          <div className="p-5">
+                            <div className="flex justify-between items-start mb-6">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center font-black text-sm text-slate-300 shadow-inner">
+                                  {item.ticker.slice(0, 2)}
+                                </div>
+                                <div>
+                                  <h4 className="font-black text-white text-xl leading-tight tracking-tight">{item.ticker}</h4>
+                                  <p className="text-[11px] text-slate-400 font-mono uppercase tracking-wider mt-0.5">{item.amount.toLocaleString()} Units</p>
+                                </div>
                               </div>
-                              <div>
-                                <h4 className="font-bold text-white text-lg leading-tight">{item.ticker}</h4>
-                                <p className="text-[10px] text-slate-500 font-mono tracking-tighter uppercase">{item.amount.toLocaleString()} Units</p>
+                              <div className="text-right">
+                                <div className="text-xl font-mono font-black text-white tracking-tight">${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                <div className={cn(
+                                  "text-[10px] font-bold flex items-center justify-end gap-1 mb-1 bg-white/5 px-2 py-0.5 rounded-lg inline-flex ml-auto mt-1",
+                                  pnl >= 0 ? "text-emerald-400 bg-emerald-500/10" : "text-red-400 bg-red-500/10"
+                                )}>
+                                  {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(pnlPct).toFixed(1)}%)
+                                </div>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <div className="text-lg font-mono font-bold text-white">${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                              <div className={cn(
-                                "text-[10px] font-bold flex items-center justify-end gap-1",
-                                pnl >= 0 ? "text-emerald-400" : "text-red-400"
-                              )}>
-                                {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(pnlPct).toFixed(1)}%)
+
+                            <div className="grid grid-cols-3 gap-2 bg-black/20 rounded-xl p-3 border border-white/5">
+                              <div className="text-center">
+                                <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Buy Price</div>
+                                <div className="text-xs font-mono font-bold text-slate-300">${item.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                              </div>
+                              <div className="text-center border-l border-white/5">
+                                <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Live Price</div>
+                                <div className="text-xs font-mono font-bold text-emerald-400">
+                                  ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "..."}
+                                </div>
+                              </div>
+                              <div className="text-center border-l border-white/5">
+                                <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Date</div>
+                                <div className="text-xs font-mono font-bold text-slate-400">
+                                  {item.tradeDate ? new Date(item.tradeDate).toLocaleDateString('en-GB') : "N/A"}
+                                </div>
                               </div>
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-white/5 pt-2 font-mono">
-                            <span>Cost Basis: ${item.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 4 })}</span>
-                            <span>Live: ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 4 }) : "..."}</span>
+                          {/* Action Footer */}
+                          <div className="grid grid-cols-3 border-t border-white/5 bg-white/[0.02]">
+                            <button
+                              onClick={() => startEditing(item)}
+                              className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-blue-400 hover:bg-blue-500/5 transition-all border-r border-white/5"
+                            >
+                              <Edit size={12} /> Edit
+                            </button>
+                            <button
+                              onClick={() => startSelling(item)}
+                              className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/5 transition-all border-r border-white/5"
+                            >
+                              <Minus size={12} /> Sell
+                            </button>
+                            <button
+                              onClick={() => handleRemoveAsset(item.id)}
+                              className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-red-400 hover:bg-red-500/5 transition-all"
+                            >
+                              <Trash2 size={12} /> Delete
+                            </button>
                           </div>
                         </div>
                       );
@@ -647,13 +805,14 @@ export default function Home() {
                   >
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="font-bold text-white flex items-center gap-2 uppercase tracking-widest text-xs">
-                        <Plus className="text-blue-400" size={14} /> New Asset
+                        {editingAsset ? <Edit className="text-blue-400" size={14} /> : <Plus className="text-blue-400" size={14} />}
+                        {editingAsset ? "Edit Asset" : "New Asset"}
                       </h4>
-                      <button onClick={() => setIsAddingAsset(false)} className="text-slate-500 hover:text-white transition-colors">
+                      <button onClick={() => { setIsAddingAsset(false); setEditingAsset(null); setNewAsset({ ticker: "", amount: "", price: "", date: "" }); }} className="text-slate-500 hover:text-white transition-colors">
                         <X size={16} />
                       </button>
                     </div>
-                    <form onSubmit={handleAddAsset} className="space-y-4">
+                    <form onSubmit={handleSaveAsset} className="space-y-4">
                       <div className="grid grid-cols-3 gap-3">
                         <div className="col-span-1">
                           <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Ticker</label>
@@ -690,12 +849,21 @@ export default function Home() {
                           className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none"
                           required
                         />
+                        <div className="col-span-2">
+                          <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Trade Date</label>
+                          <input
+                            type="date"
+                            value={newAsset.date}
+                            onChange={(e) => setNewAsset({ ...newAsset, date: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none"
+                          />
+                        </div>
                       </div>
                       <button
                         type="submit"
                         className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 transition-all"
                       >
-                        Add to Secure Ledger
+                        {editingAsset ? "Update Record" : "Add to Secure Ledger"}
                       </button>
                     </form>
                   </motion.div>

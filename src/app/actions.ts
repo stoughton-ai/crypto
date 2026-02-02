@@ -61,6 +61,7 @@ async function getRealTimePrice(ticker: string) {
     const tickerMap: Record<string, string> = {
       'BTC': 'bitcoin', 'ETH': 'ethereum', 'SOL': 'solana', 'ADA': 'cardano',
       'XRP': 'ripple', 'DOT': 'polkadot', 'AVAX': 'avalanche-2', 'LINK': 'chainlink',
+      'GODS': 'gods-unchained',
     };
     let id = tickerMap[tickerUpper];
     if (!id) {
@@ -269,6 +270,27 @@ export async function getSimplePrices(tickers: string[]) {
 
   await Promise.all(tickers.map(async (ticker) => {
     // Try Binance first as it's fastest and reliable for major pairs
+    // EXCEPT for mapped tokens where we prefer CoinGecko ID
+    const tickerMap: Record<string, string> = {
+      'GODS': 'gods-unchained',
+      'BTC': 'bitcoin', 'ETH': 'ethereum', 'SOL': 'solana', 'ADA': 'cardano',
+      'XRP': 'ripple', 'DOT': 'polkadot', 'AVAX': 'avalanche-2', 'LINK': 'chainlink',
+    };
+
+    const mappedId = tickerMap[ticker.toUpperCase()];
+    if (mappedId) {
+      try {
+        const pRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${mappedId}&vs_currencies=usd`);
+        const pData = await pRes.json();
+        if (pData[mappedId]?.usd) {
+          prices[ticker.toUpperCase()] = pData[mappedId].usd;
+          return; // Skip Binance if mapped ID worked
+        }
+      } catch (e) {
+        console.warn(`Mapped fetch failed for ${ticker}, trying Binance...`);
+      }
+    }
+
     const bPrice = await fetchBinancePrice(ticker);
     if (bPrice) {
       prices[ticker.toUpperCase()] = bPrice;

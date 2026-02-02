@@ -32,9 +32,10 @@ export interface PortfolioItem {
     amount: number;
     averagePrice: number;
     addedAt: string;
+    tradeDate?: string;
 }
 
-export const addToPortfolio = async (userId: string, ticker: string, amount: number, averagePrice: number) => {
+export const addToPortfolio = async (userId: string, ticker: string, amount: number, averagePrice: number, tradeDate?: string) => {
     try {
         const docRef = await addDoc(collection(db, PORTFOLIO_COLLECTION), {
             userId,
@@ -42,6 +43,7 @@ export const addToPortfolio = async (userId: string, ticker: string, amount: num
             amount,
             averagePrice,
             addedAt: new Date().toISOString(),
+            tradeDate: tradeDate || new Date().toISOString(),
             createdAt: Timestamp.now(),
         });
         return docRef.id;
@@ -135,6 +137,84 @@ export const fetchPortfolioHistory = async (userId: string) => {
         } as PortfolioSnapshot));
     } catch (error) {
         console.error("Error fetching portfolio history:", error);
+        return [];
+    }
+};
+
+export const clearPortfolio = async (userId: string) => {
+    try {
+        const q = query(collection(db, PORTFOLIO_COLLECTION), where("userId", "==", userId));
+        const snapshot = await getDocs(q);
+        const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(deletePromises);
+        return true;
+    } catch (error) {
+        console.error("Error clearing portfolio:", error);
+        return false;
+    }
+};
+
+const REALIZED_PNL_COLLECTION = "realized_pnl";
+
+export interface RealizedTrade {
+    id: string;
+    userId: string;
+    ticker: string;
+    sellAmount: number;
+    sellPrice: number;
+    costBasis: number;
+    realizedPnl: number;
+    date: string;
+    createdAt: Timestamp;
+}
+
+export const recordTrade = async (userId: string, ticker: string, sellAmount: number, sellPrice: number, costBasis: number, date?: string) => {
+    try {
+        const realizedPnl = (sellPrice - costBasis) * sellAmount;
+        await addDoc(collection(db, REALIZED_PNL_COLLECTION), {
+            userId,
+            ticker: ticker.toUpperCase(),
+            sellAmount,
+            sellPrice,
+            costBasis,
+            realizedPnl,
+            date: date || new Date().toISOString(),
+            createdAt: Timestamp.now(),
+        });
+        return true;
+    } catch (error) {
+        console.error("Error recording trade:", error);
+        return false;
+    }
+};
+
+export const fetchRealizedTrades = async (userId: string) => {
+    try {
+        const q = query(
+            collection(db, REALIZED_PNL_COLLECTION),
+            where("userId", "==", userId),
+            orderBy("createdAt", "desc")
+        );
+        const querySnapshot = await getDocs(q);
+        return querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        } as RealizedTrade));
+    } catch (error) {
+        console.error("Error fetching realized trades:", error);
+        // Fallback for missing index
+        if (error instanceof Error && error.message.includes("index")) {
+            const qBasic = query(collection(db, REALIZED_PNL_COLLECTION), where("userId", "==", userId));
+            const snapshot = await getDocs(qBasic);
+            return snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            } as RealizedTrade)).sort((a: any, b: any) => {
+                const timeA = a.createdAt?.toMillis() || 0;
+                const timeB = b.createdAt?.toMillis() || 0;
+                return timeB - timeA;
+            });
+        }
         return [];
     }
 };
