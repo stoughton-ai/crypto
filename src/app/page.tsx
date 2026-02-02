@@ -837,18 +837,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="text-center mb-8 md:mb-12">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.5 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="mb-6 flex justify-center"
-        >
-          <img
-            src="/traffic-light-header.png"
-            alt="Crypto Traffic Light"
-            className="h-24 md:h-32 object-contain drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]"
-          />
-        </motion.div>
+      <div className="text-center mb-8 md:mb-12 mt-12 md:mt-24">
         <motion.h1
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
