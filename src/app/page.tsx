@@ -291,7 +291,7 @@ export default function Home() {
               Secure Terminal
             </h1>
             <p className="text-slate-400 mb-10 text-lg">
-              Access the Crypto Traffic Light System via your authorized Google Account.
+              Access the Crypto Traffic <br className="sm:hidden" /> Light System via your authorized Google Account.
             </p>
 
             <button
@@ -833,10 +833,10 @@ export default function Home() {
           animate={{ opacity: 1, y: 0 }}
           className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4 md:mb-8 pb-2 leading-tight bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent"
         >
-          Crypto Traffic Light System
+          Crypto Traffic <br className="sm:hidden" /> Light System
         </motion.h1>
         <p className="text-slate-400 text-base md:text-lg max-w-2xl mx-auto flex flex-col gap-2 mt-4 px-4">
-          <span>AI-powered technical analysis for small investors.</span>
+          <span>AI-powered technical analysis<span className="hidden sm:inline"> for small investors</span>.</span>
           <span className="text-blue-400 font-semibold tracking-wide uppercase text-xs md:text-sm">The 60/40 rule of safety and timing</span>
         </p>
       </div>
