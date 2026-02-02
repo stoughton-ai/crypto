@@ -1210,6 +1210,30 @@ export default function Home() {
                 </div>
 
                 <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mt-auto">
+                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">
+                      {result.dailyLow ? "Daily Low" : "ATL"}
+                    </div>
+                    <div className="text-lg md:text-xl font-mono font-bold text-red-400/90">
+                      ${formatPrice(result.dailyLow || result.allTimeLow)}
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-medium font-mono">
+                      +{Math.abs(((result.currentPrice - (result.dailyLow || result.allTimeLow)) / (result.dailyLow || result.allTimeLow)) * 100).toFixed(1)}%
+                    </div>
+                  </div>
+
+                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">
+                      {result.dailyHigh ? "Daily High" : "ATH"}
+                    </div>
+                    <div className="text-lg md:text-xl font-mono font-bold text-emerald-400/90">
+                      ${formatPrice(result.dailyHigh || result.allTimeHigh)}
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-medium font-mono">
+                      -{Math.abs(((result.currentPrice - (result.dailyHigh || result.allTimeHigh)) / (result.dailyHigh || result.allTimeHigh)) * 100).toFixed(1)}%
+                    </div>
+                  </div>
+
                   <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors group relative">
                     <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">
                       7D Avg <Info size={10} className="hidden xs:block opacity-50" />
@@ -1241,22 +1265,6 @@ export default function Home() {
                       {result.price30dAvg > 0
                         ? `${(((result.currentPrice - result.price30dAvg) / result.price30dAvg) * 100).toFixed(1)}%`
                         : "N/A"}
-                    </div>
-                  </div>
-
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">ATH</div>
-                    <div className="text-lg md:text-xl font-mono font-bold text-emerald-400/90">${formatPrice(result.allTimeHigh)}</div>
-                    <div className="text-[9px] text-slate-500 font-medium font-mono">
-                      -{Math.abs(((result.currentPrice - result.allTimeHigh) / result.allTimeHigh) * 100).toFixed(1)}%
-                    </div>
-                  </div>
-
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">ATL</div>
-                    <div className="text-lg md:text-xl font-mono font-bold text-red-400/90">${formatPrice(result.allTimeLow)}</div>
-                    <div className="text-[9px] text-slate-500 font-medium font-mono">
-                      +{Math.abs(((result.currentPrice - result.allTimeLow) / result.allTimeLow) * 100).toFixed(1)}%
                     </div>
                   </div>
                 </div>

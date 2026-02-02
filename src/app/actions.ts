@@ -85,7 +85,7 @@ async function getRealTimePrice(ticker: string) {
     const cgPrice = cgData.market_data.current_price.usd;
 
     let finalPrice = cgPrice;
-    let verificationStatus = "Verified via CoinGecko";
+    let verificationStatus = "CoinGecko";
 
     // 2. Cross-check logic
     if (binancePrice) {
@@ -100,10 +100,10 @@ async function getRealTimePrice(ticker: string) {
 
           if (diffCGK < diffBinanceK && diffCGK < 1.0) {
             finalPrice = (cgPrice + krakenPrice) / 2;
-            verificationStatus = "Verified via CoinGecko & Kraken (Binance outlier)";
+            verificationStatus = "CoinGecko & Kraken (Binance outlier)";
           } else if (diffBinanceK < 1.0) {
             finalPrice = (binancePrice + krakenPrice) / 2;
-            verificationStatus = "Verified via Binance & Kraken (CoinGecko outlier)";
+            verificationStatus = "Binance & Kraken (CoinGecko outlier)";
           } else {
             finalPrice = (cgPrice + binancePrice + krakenPrice) / 3;
             verificationStatus = "Discrepancy detected; averaged across all 3 sources";
@@ -111,7 +111,7 @@ async function getRealTimePrice(ticker: string) {
         }
       } else {
         finalPrice = (cgPrice + binancePrice) / 2;
-        verificationStatus = "Verified via CoinGecko & Binance";
+        verificationStatus = "CoinGecko & Binance";
       }
     }
 
@@ -126,6 +126,8 @@ async function getRealTimePrice(ticker: string) {
       atl: cgData.market_data.atl.usd,
       atlDate: cgData.market_data.atl_date.usd,
       mcap: cgData.market_data.market_cap.usd,
+      high24h: cgData.market_data.high_24h.usd,
+      low24h: cgData.market_data.low_24h.usd,
       avg7d: avg7d || 0,
       avg30d: avg30d || 0,
       name: cgData.name,
@@ -152,7 +154,9 @@ export async function analyzeCrypto(ticker: string, historyContextString?: strin
   const groundingContext = realTimeData
     ? `IMPORTANT FACTUAL DATA: The current real-time price of ${realTimeData.name} is $${realTimeData.price.toFixed(realTimeData.price < 1 ? 4 : 2)}. 
        Verification Status: ${realTimeData.verificationStatus}.
-       24h Change: ${realTimeData.change24h}%. Market Cap: $${realTimeData.mcap}. 
+       24h Change: ${realTimeData.change24h}%. Market Cap: $${realTimeData.mcap}.
+       24h HIGH: $${realTimeData.high24h?.toFixed(realTimeData.high24h < 1 ? 4 : 2) || "N/A"}.
+       24h LOW: $${realTimeData.low24h?.toFixed(realTimeData.low24h < 1 ? 4 : 2) || "N/A"}.
        7-Day AVERAGE Price: ${realTimeData.avg7d > 0 ? `$${realTimeData.avg7d.toFixed(realTimeData.avg7d < 1 ? 4 : 2)}` : "DATA NOT AVAILABLE"}.
        30-Day AVERAGE Price: ${realTimeData.avg30d > 0 ? `$${realTimeData.avg30d.toFixed(realTimeData.avg30d < 1 ? 4 : 2)}` : "DATA NOT AVAILABLE"}.
        ATH: $${realTimeData.ath.toFixed(realTimeData.ath < 1 ? 4 : 2)} (Date: ${realTimeData.athDate}). 
@@ -201,6 +205,8 @@ export async function analyzeCrypto(ticker: string, historyContextString?: strin
       "priceChange24h": number (percentage change),
       "price7dAvg": number (average price over 7 days),
       "price30dAvg": number (average price over 30 days),
+      "dailyHigh": number (highest price in last 24h),
+      "dailyLow": number (lowest price in last 24h),
       "allTimeHigh": number (highest price ever),
       "athDate": "YYYY-MM-DD",
       "allTimeLow": number (lowest price ever),
