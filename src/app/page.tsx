@@ -64,6 +64,7 @@ export default function Home() {
   const [sellData, setSellData] = useState({ amount: "", price: "", date: "" });
   const [lastLoggedValue, setLastLoggedValue] = useState<number | null>(null);
   const [isRevaluing, setIsRevaluing] = useState(false);
+  const [portfolioTab, setPortfolioTab] = useState<'holdings' | 'history'>('holdings');
 
   // Auto-Retry State
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
@@ -613,186 +614,249 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Portfolio Stats */}
-              <div className="relative bg-emerald-500/5 border border-emerald-500/20 rounded-3xl p-6 mb-8 group">
+              <div className="flex bg-slate-800/50 p-1 rounded-xl mb-6">
                 <button
-                  onClick={handleRevaluePortfolio}
-                  disabled={isRevaluing}
-                  className="absolute top-4 right-4 p-2 rounded-xl bg-slate-900/50 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all disabled:opacity-50 disabled:animate-pulse"
-                  title="Force Revaluation (Confirmed Data)"
+                  onClick={() => setPortfolioTab('holdings')}
+                  className={cn(
+                    "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all",
+                    portfolioTab === 'holdings' ? "bg-white text-slate-900 shadow-lg" : "text-slate-500 hover:text-white"
+                  )}
                 >
-                  <RefreshCw size={16} className={cn(isRevaluing && "animate-spin")} />
+                  Holdings
                 </button>
-                <p className="text-xs font-bold uppercase tracking-widest text-emerald-500/60 mb-1">Total Balance</p>
-                <div className="text-3xl font-black text-white font-mono">
-                  ${portfolioItems.reduce((acc, item) => acc + (item.amount * (portfolioPrices[item.ticker] || item.averagePrice)), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <div className={cn(
-                    "flex items-center gap-1 text-sm font-bold",
-                    portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0) >= 0 ? "text-emerald-400" : "text-red-400"
-                  )}>
-                    {portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0) >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
-                    ${Math.abs(portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">All Time PNL</span>
-                </div>
-                {/* Realized PNL Display */}
-                {realizedTrades.length > 0 && (
-                  <div className="flex items-center gap-2 mt-4 pt-4 border-t border-emerald-500/20">
-                    <div className={cn(
-                      "flex items-center gap-1 text-sm font-bold",
-                      realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0) >= 0 ? "text-blue-400" : "text-red-400"
-                    )}>
-                      <DollarSign size={16} />
-                      ${realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Realized Profits</span>
-                  </div>
-                )}
+                <button
+                  onClick={() => setPortfolioTab('history')}
+                  className={cn(
+                    "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all",
+                    portfolioTab === 'history' ? "bg-white text-slate-900 shadow-lg" : "text-slate-500 hover:text-white"
+                  )}
+                >
+                  History
+                </button>
               </div>
 
-              {/* History Chart */}
-              {portfolioHistory.length > 1 && (
-                <div className="mb-8 overflow-hidden">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Value Trend</h3>
-                  <div className="h-32 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={portfolioHistory}>
-                        <defs>
-                          <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (active && payload && payload.length) {
-                              return (
-                                <div className="glass p-2 border-white/10 rounded-lg text-[10px] font-mono">
-                                  <p className="text-slate-400">{new Date(payload[0].payload.timestamp).toLocaleDateString()}</p>
-                                  <p className="text-emerald-400 font-bold">${payload[0].value?.toLocaleString()}</p>
+              {portfolioTab === 'holdings' ? (
+                <>
+                  {/* Portfolio Stats */}
+                  <div className="relative bg-emerald-500/5 border border-emerald-500/20 rounded-3xl p-6 mb-8 group">
+                    <button
+                      onClick={handleRevaluePortfolio}
+                      disabled={isRevaluing}
+                      className="absolute top-4 right-4 p-2 rounded-xl bg-slate-900/50 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all disabled:opacity-50 disabled:animate-pulse"
+                      title="Force Revaluation (Confirmed Data)"
+                    >
+                      <RefreshCw size={16} className={cn(isRevaluing && "animate-spin")} />
+                    </button>
+                    <p className="text-xs font-bold uppercase tracking-widest text-emerald-500/60 mb-1">Total Balance</p>
+                    <div className="text-3xl font-black text-white font-mono">
+                      ${portfolioItems.reduce((acc, item) => acc + (item.amount * (portfolioPrices[item.ticker] || item.averagePrice)), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <div className={cn(
+                        "flex items-center gap-1 text-sm font-bold",
+                        portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0) >= 0 ? "text-emerald-400" : "text-red-400"
+                      )}>
+                        {portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0) >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
+                        ${Math.abs(portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">All Time PNL</span>
+                    </div>
+                    {/* Realized PNL Display */}
+                    {realizedTrades.length > 0 && (
+                      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-emerald-500/20">
+                        <div className={cn(
+                          "flex items-center gap-1 text-sm font-bold",
+                          realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0) >= 0 ? "text-blue-400" : "text-red-400"
+                        )}>
+                          <DollarSign size={16} />
+                          ${realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Realized Profits</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* History Chart */}
+                  {portfolioHistory.length > 1 && (
+                    <div className="mb-8 overflow-hidden">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Value Trend</h3>
+                      <div className="h-32 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={portfolioHistory}>
+                            <defs>
+                              <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <Tooltip
+                              content={({ active, payload }) => {
+                                if (active && payload && payload.length) {
+                                  return (
+                                    <div className="glass p-2 border-white/10 rounded-lg text-[10px] font-mono">
+                                      <p className="text-slate-400">{new Date(payload[0].payload.timestamp).toLocaleDateString()}</p>
+                                      <p className="text-emerald-400 font-bold">${payload[0].value?.toLocaleString()}</p>
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              }}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="totalValue"
+                              stroke="#10b981"
+                              fillOpacity={1}
+                              fill="url(#colorValue)"
+                              strokeWidth={2}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Asset List */}
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">My Assets</h3>
+                      <button
+                        onClick={() => setIsAddingAsset(true)}
+                        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 transition-colors"
+                      >
+                        <Plus size={14} /> Add Asset
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 overflow-y-auto pr-2 pb-6 custom-scrollbar">
+                      {portfolioItems.length === 0 ? (
+                        <div className="text-center py-12 border border-dashed border-white/5 rounded-3xl">
+                          <p className="text-slate-500 text-sm">No assets tracked yet.</p>
+                          <button
+                            onClick={() => setIsAddingAsset(true)}
+                            className="mt-4 text-xs font-bold text-blue-400 hover:underline"
+                          >
+                            Start tracking your holdings
+                          </button>
+                        </div>
+                      ) : (
+                        portfolioItems.map((item) => {
+                          const currentPrice = portfolioPrices[item.ticker];
+                          const value = item.amount * (currentPrice || item.averagePrice);
+                          const pnl = currentPrice ? (currentPrice - item.averagePrice) * item.amount : 0;
+                          const pnlPct = currentPrice ? ((currentPrice - item.averagePrice) / item.averagePrice) * 100 : 0;
+
+                          return (
+                            <div key={item.id} className="glass rounded-2xl border-white/5 hover:border-emerald-500/30 transition-all group overflow-hidden">
+                              <div className="p-5">
+                                <div className="flex justify-between items-start mb-6">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center font-black text-sm text-slate-300 shadow-inner">
+                                      {item.ticker.slice(0, 2)}
+                                    </div>
+                                    <div>
+                                      <h4 className="font-black text-white text-xl leading-tight tracking-tight">{item.ticker}</h4>
+                                      <p className="text-[11px] text-slate-400 font-mono uppercase tracking-wider mt-0.5">{item.amount.toLocaleString()} Units</p>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xl font-mono font-black text-white tracking-tight">${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                    <div className={cn(
+                                      "text-[10px] font-bold flex items-center justify-end gap-1 mb-1 bg-white/5 px-2 py-0.5 rounded-lg inline-flex ml-auto mt-1",
+                                      pnl >= 0 ? "text-emerald-400 bg-emerald-500/10" : "text-red-400 bg-red-500/10"
+                                    )}>
+                                      {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(pnlPct).toFixed(1)}%)
+                                    </div>
+                                  </div>
                                 </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="totalValue"
-                          stroke="#10b981"
-                          fillOpacity={1}
-                          fill="url(#colorValue)"
-                          strokeWidth={2}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
+
+                                <div className="grid grid-cols-3 gap-2 bg-black/20 rounded-xl p-3 border border-white/5">
+                                  <div className="text-center">
+                                    <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Buy Price</div>
+                                    <div className="text-xs font-mono font-bold text-slate-300">${item.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                                  </div>
+                                  <div className="text-center border-l border-white/5">
+                                    <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Live Price</div>
+                                    <div className="text-xs font-mono font-bold text-emerald-400">
+                                      ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "..."}
+                                    </div>
+                                  </div>
+                                  <div className="text-center border-l border-white/5">
+                                    <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Date</div>
+                                    <div className="text-xs font-mono font-bold text-slate-400">
+                                      {item.tradeDate ? new Date(item.tradeDate).toLocaleDateString('en-GB') : "N/A"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Action Footer */}
+                              <div className="grid grid-cols-3 border-t border-white/5 bg-white/[0.02]">
+                                <button
+                                  onClick={() => startEditing(item)}
+                                  className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-blue-400 hover:bg-blue-500/5 transition-all border-r border-white/5"
+                                >
+                                  <Edit size={12} /> Edit
+                                </button>
+                                <button
+                                  onClick={() => startSelling(item)}
+                                  className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/5 transition-all border-r border-white/5"
+                                >
+                                  <Minus size={12} /> Sell
+                                </button>
+                                <button
+                                  onClick={() => handleRemoveAsset(item.id)}
+                                  className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-red-400 hover:bg-red-500/5 transition-all"
+                                >
+                                  <Trash2 size={12} /> Delete
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col min-h-0">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Transaction History</h3>
+                  <div className="space-y-3 overflow-y-auto pr-2 pb-6 custom-scrollbar">
+                    {realizedTrades.length === 0 ? (
+                      <div className="text-center py-12 text-slate-500">
+                        <p>No transaction history yet.</p>
+                      </div>
+                    ) : (
+                      realizedTrades.map((trade) => (
+                        <div key={trade.id} className="glass rounded-xl p-4 border-white/5 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-bold text-xs text-slate-400">
+                              {trade.ticker.slice(0, 2)}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-white text-sm">{trade.ticker}</h4>
+                              <p className="text-[10px] text-slate-400">
+                                Sold {trade.sellAmount} @ ${trade.sellPrice}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className={cn(
+                              "text-sm font-bold font-mono",
+                              trade.realizedPnl >= 0 ? "text-emerald-400" : "text-red-400"
+                            )}>
+                              {trade.realizedPnl >= 0 ? "+" : "-"}${Math.abs(trade.realizedPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              {new Date(trade.date).toLocaleDateString('en-GB')}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               )}
-
-              {/* Asset List */}
-              <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">My Assets</h3>
-                  <button
-                    onClick={() => setIsAddingAsset(true)}
-                    className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 transition-colors"
-                  >
-                    <Plus size={14} /> Add Asset
-                  </button>
-                </div>
-
-                <div className="space-y-3 overflow-y-auto pr-2 pb-6 custom-scrollbar">
-                  {portfolioItems.length === 0 ? (
-                    <div className="text-center py-12 border border-dashed border-white/5 rounded-3xl">
-                      <p className="text-slate-500 text-sm">No assets tracked yet.</p>
-                      <button
-                        onClick={() => setIsAddingAsset(true)}
-                        className="mt-4 text-xs font-bold text-blue-400 hover:underline"
-                      >
-                        Start tracking your holdings
-                      </button>
-                    </div>
-                  ) : (
-                    portfolioItems.map((item) => {
-                      const currentPrice = portfolioPrices[item.ticker];
-                      const value = item.amount * (currentPrice || item.averagePrice);
-                      const pnl = currentPrice ? (currentPrice - item.averagePrice) * item.amount : 0;
-                      const pnlPct = currentPrice ? ((currentPrice - item.averagePrice) / item.averagePrice) * 100 : 0;
-
-                      return (
-                        <div key={item.id} className="glass rounded-2xl border-white/5 hover:border-emerald-500/30 transition-all group overflow-hidden">
-                          <div className="p-5">
-                            <div className="flex justify-between items-start mb-6">
-                              <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center font-black text-sm text-slate-300 shadow-inner">
-                                  {item.ticker.slice(0, 2)}
-                                </div>
-                                <div>
-                                  <h4 className="font-black text-white text-xl leading-tight tracking-tight">{item.ticker}</h4>
-                                  <p className="text-[11px] text-slate-400 font-mono uppercase tracking-wider mt-0.5">{item.amount.toLocaleString()} Units</p>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-xl font-mono font-black text-white tracking-tight">${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                                <div className={cn(
-                                  "text-[10px] font-bold flex items-center justify-end gap-1 mb-1 bg-white/5 px-2 py-0.5 rounded-lg inline-flex ml-auto mt-1",
-                                  pnl >= 0 ? "text-emerald-400 bg-emerald-500/10" : "text-red-400 bg-red-500/10"
-                                )}>
-                                  {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(pnlPct).toFixed(1)}%)
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-2 bg-black/20 rounded-xl p-3 border border-white/5">
-                              <div className="text-center">
-                                <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Buy Price</div>
-                                <div className="text-xs font-mono font-bold text-slate-300">${item.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                              </div>
-                              <div className="text-center border-l border-white/5">
-                                <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Live Price</div>
-                                <div className="text-xs font-mono font-bold text-emerald-400">
-                                  ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "..."}
-                                </div>
-                              </div>
-                              <div className="text-center border-l border-white/5">
-                                <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Date</div>
-                                <div className="text-xs font-mono font-bold text-slate-400">
-                                  {item.tradeDate ? new Date(item.tradeDate).toLocaleDateString('en-GB') : "N/A"}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Action Footer */}
-                          <div className="grid grid-cols-3 border-t border-white/5 bg-white/[0.02]">
-                            <button
-                              onClick={() => startEditing(item)}
-                              className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-blue-400 hover:bg-blue-500/5 transition-all border-r border-white/5"
-                            >
-                              <Edit size={12} /> Edit
-                            </button>
-                            <button
-                              onClick={() => startSelling(item)}
-                              className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/5 transition-all border-r border-white/5"
-                            >
-                              <Minus size={12} /> Sell
-                            </button>
-                            <button
-                              onClick={() => handleRemoveAsset(item.id)}
-                              className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-red-400 hover:bg-red-500/5 transition-all"
-                            >
-                              <Trash2 size={12} /> Delete
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
 
               {/* Add Asset Modal/Form */}
               <AnimatePresence>
