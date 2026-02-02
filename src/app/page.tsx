@@ -837,7 +837,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="text-center mb-8 md:mb-12 mt-12 md:mt-24">
+      <div className="text-center mb-16 md:mb-12 mt-32 md:mt-24">
         <motion.h1
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -852,7 +852,7 @@ export default function Home() {
       </div>
 
       {/* Search Bar */}
-      <form onSubmit={handleSearch} className="max-w-md mx-auto mb-16 relative">
+      <form onSubmit={handleSearch} className="max-w-md mx-auto mb-24 md:mb-16 relative">
         <div className="relative group">
           <input
             type="text"
@@ -1132,7 +1132,7 @@ export default function Home() {
 
       {/* Footer Info */}
       {!result && !loading && (
-        <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="mt-20 hidden md:grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
             <ShieldCheck className="mx-auto mb-4 text-blue-400" size={32} />
             <h4 className="font-bold mb-2">Safety First</h4>
