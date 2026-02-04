@@ -1094,7 +1094,7 @@ export default function Home() {
 
           <div className="flex items-center gap-2 opacity-60">
             <ShieldCheck size={18} className="text-blue-400 md:w-5 md:h-5" />
-            <span className="font-mono text-[10px] md:text-xs font-bold uppercase tracking-widest text-white truncate max-w-[120px] md:max-w-none">System v2.5</span>
+            <span className="font-mono text-[10px] md:text-xs font-bold uppercase tracking-widest text-emerald-400 truncate max-w-[120px] md:max-w-none">System v2.5 (Latest)</span>
           </div>
         </div>
 
