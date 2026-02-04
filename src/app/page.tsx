@@ -33,7 +33,6 @@ export default function Home() {
   const [ticker, setTicker] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CryptoAnalysisResult | null>(null);
-  const [error, setError] = useState("");
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [libraryReports, setLibraryReports] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -310,7 +309,6 @@ export default function Home() {
     if (!ticker || !user) return;
 
     setLoading(true);
-    setError("");
     try {
       // 1. Get RICH history context (Last 10 reports)
       const tickerHistory = libraryReports
@@ -342,8 +340,13 @@ export default function Home() {
         loadLibrary(); // Refresh library after new save
       }
     } catch (err) {
-      setError("Failed to fetch analysis. Ensure your API key is configured.");
       console.error(err);
+      setModalConfig({
+        isOpen: true,
+        title: "Analysis Failed",
+        message: "Failed to fetch analysis. Ensure your API key is configured.",
+        type: "alert"
+      });
       setRetryCountdown(null);
     } finally {
       setLoading(false);
@@ -1146,7 +1149,6 @@ export default function Home() {
             {loading ? <Loader2 className="animate-spin" size={20} /> : "Analyze"}
           </button>
         </div>
-        {error && <p className="text-red-400 mt-2 text-sm text-center">{error}</p>}
       </form>
 
       <AnimatePresence>
