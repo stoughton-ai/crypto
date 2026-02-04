@@ -38,5 +38,6 @@ export interface CryptoAnalysisResult {
     status: "RED" | "AMBER" | "GREEN";
   }[];
   summary: string;
+  historicalInsight: string;
   savedAt?: string;
 }

@@ -312,13 +312,19 @@ export default function Home() {
     setLoading(true);
     setError("");
     try {
-      // 1. Get history context from existing reports for this ticker
+      // 1. Get RICH history context (Last 10 reports)
       const tickerHistory = libraryReports
-        .filter((r: any) => r.ticker.toUpperCase() === ticker.toUpperCase())
-        .slice(0, 3);
+        .filter((r: any) => r && r.ticker && r.ticker.toUpperCase() === ticker.toUpperCase())
+        .sort((a: any, b: any) => new Date(b.savedAt || 0).getTime() - new Date(a.savedAt || 0).getTime())
+        .slice(0, 10);
 
       const historyContextString = tickerHistory.length > 0
-        ? `You have analyzed this asset before. Previous Scores: ${tickerHistory.map((h: any) => `${h.overallScore}/100 on ${new Date(h.savedAt).toLocaleDateString('en-GB')}`).join(", ")}. USE THIS to identify if the sentiment or fundamentals are IMPROVING or DECLINING compared to previous reports.`
+        ? JSON.stringify(tickerHistory.map((h: any) => ({
+          date: new Date(h.savedAt || Date.now()).toLocaleDateString('en-GB'),
+          price: h.currentPrice,
+          score: h.overallScore,
+          summary: h.summary
+        })))
         : "";
 
       // 2. Analyze via server action
@@ -1384,6 +1390,18 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+
+              {/* Historical Trend Insight */}
+              {result.historicalInsight && (
+                <div className="w-full max-w-3xl mt-6 pt-6 border-t border-white/5 text-center">
+                  <h4 className="text-sm font-bold uppercase tracking-widest text-violet-400 mb-3 flex items-center justify-center gap-2">
+                    <Activity size={16} /> Historical Trend Analysis
+                  </h4>
+                  <p className="text-slate-300 italic text-sm md:text-base leading-relaxed bg-violet-500/5 border border-violet-500/10 p-4 rounded-xl">
+                    "{result.historicalInsight}"
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Signals Grid */}

@@ -167,10 +167,11 @@ export async function analyzeCrypto(ticker: string, historyContextString?: strin
   const prompt = `
     Analyze the cryptocurrency with the ticker "${ticker}" based on the following 10 research signals.
     ${groundingContext}
-    ${historyContext}
+    
+    HISTORICAL INTELLIGENCE (FROM USER LIBRARY):
+    ${historyContext || "No prior research found for this asset."}
     
     You MUST search for real-time data or recent reports from the last 30 days to calculate technical levels.
-    If historical averages were provided as DATA NOT AVAILABLE, note this in your summary.
     
     Current Date: ${new Date().toLocaleDateString('en-GB')}
     ...
@@ -196,6 +197,13 @@ export async function analyzeCrypto(ticker: string, historyContextString?: strin
     - 75-100: GREEN
     - 45-74: AMBER
     - 0-44: RED
+
+    **HISTORICAL INSIGHT SECTION**:
+    - Analyze the provided "HISTORICAL INTELLIGENCE" JSON data (if it exists).
+    - Compare the current analysis with previous dates.
+    - Identification of TRENDS: Is the score rising or falling? Are prices higher or lower than previous analyses?
+    - If no history exists, state "First analysis for this asset - baseline established."
+    - This should be a 2-3 sentence strategic observation.
 
     Return the result strictly in JSON format matching this structure:
     {
@@ -226,18 +234,12 @@ export async function analyzeCrypto(ticker: string, historyContextString?: strin
         },
         ... (all 10 signals)
       ],
-      "summary": "Short 2-3 sentence executive summary."
+      "summary": "Short 2-3 sentence executive summary.",
+      "historicalInsight": "Your trend analysis here..."
     }
   `;
 
   try {
-    // Note: We are using a simple model.generateContent call. 
-    // In a production environment with Search Grounding enabled via tools, it would look like this:
-    // const result = await model.generateContent({
-    //   contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    //   tools: [{ googleSearchRetrieval: {} }]
-    // });
-
     const result = await model.generateContent(prompt);
     const responseText = result.response.text();
 
