@@ -62,8 +62,7 @@ export default function NotificationSettings() {
                 // Get Token
                 // Note: In production you often need a VAPID key. If this fails, we will log it.
                 const token = await getToken(messaging, {
-                    vapidKey: "BPj0W3g_s_FvBw0_w4k0k3g_s_FvBw0_w4k0k3g_s_Fv" // Add a dummy or valid key if needed, trying purely default first if possible, but actually standard demands key.
-                    // Actually, we'll try catching the error if key is missing.
+                    vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY
                 }).catch(async (err) => {
                     console.log("Standard token fetch failed, trying without key if that helps or just logging error", err);
                     // Note: Without a specific VAPID key committed in env, we often rely on the project's default configuration linking.
