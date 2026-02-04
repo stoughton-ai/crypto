@@ -21,7 +21,11 @@ const storage = getStorage(app);
 
 let messaging: Messaging | null = null;
 if (typeof window !== "undefined") {
-    messaging = getMessaging(app);
+    try {
+        messaging = getMessaging(app);
+    } catch (e) {
+        console.warn("Firebase Messaging failed to initialize", e);
+    }
 }
 
 export { app, auth, db, storage, messaging };
