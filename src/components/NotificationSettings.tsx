@@ -132,7 +132,7 @@ export default function NotificationSettings() {
         }
     };
 
-    if (!user) return <div className="mt-8 p-4 border-t border-white/10 text-xs text-red-500 font-bold">⚠️ Debug: Auth User Missing</div>;
+    if (!user) return null;
 
     return (
         <div className="mt-8 pt-8 border-t border-white/10">
