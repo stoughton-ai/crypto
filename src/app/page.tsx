@@ -119,7 +119,7 @@ export default function Home() {
   useEffect(() => {
     if (portfolioItems.length > 0) {
       updatePortfolioPrices();
-      const interval = setInterval(updatePortfolioPrices, 30000); // Update prices every 30s
+      const interval = setInterval(updatePortfolioPrices, 60000); // Update prices every 60s using verified engine
       return () => clearInterval(interval);
     }
   }, [portfolioItems.length]);
@@ -172,7 +172,7 @@ export default function Home() {
   const updatePortfolioPrices = async () => {
     const tickers = portfolioItems.map(item => item.ticker);
     if (tickers.length === 0) return;
-    const prices = await getSimplePrices(tickers);
+    const prices = await getVerifiedPrices(tickers);
     setPortfolioPrices(prices);
   };
 
