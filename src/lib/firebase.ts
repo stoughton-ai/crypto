@@ -14,10 +14,21 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
-const db = getFirestore(app);
-const storage = getStorage(app);
+let app: any;
+let auth: any;
+let db: any;
+let storage: any;
+
+try {
+    if (firebaseConfig.apiKey) {
+        app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+        auth = getAuth(app);
+        db = getFirestore(app);
+        storage = getStorage(app);
+    }
+} catch (e) {
+    console.warn("Firebase initialization failed (likely missing env vars during build)", e);
+}
 
 let messaging: Messaging | null = null;
 if (typeof window !== "undefined") {
