@@ -4,10 +4,11 @@ import { useState, useEffect } from "react";
 import { messaging, db } from "@/lib/firebase";
 import { getToken } from "firebase/messaging";
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
-import { Bell, BellOff, Clock, Save, Loader2 } from "lucide-react";
+import { Bell, BellOff, Clock, Save, Loader2, Activity } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx } from "clsx";
+import MonitoringStatus from "./MonitoringStatus";
 
 export default function NotificationSettings() {
     const { user } = useAuth();
@@ -168,6 +169,11 @@ export default function NotificationSettings() {
                         />
                     </button>
                 </div>
+
+                {/* Job Completion Visual Check */}
+                <MonitoringStatus />
+
+                <div className="border-t border-white/5 my-4" />
 
                 <AnimatePresence>
                     {enabled && (

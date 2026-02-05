@@ -16,11 +16,24 @@ export async function GET() {
 
     try {
         const now = new Date();
-        const dateStr = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 
-        // 1. Get Notification Settings
-        const snapshot = await adminDb.collectionGroup('settings').where('enabled', '==', true).get();
-        const validDocs = snapshot.docs.filter(d => d.id === 'notifications');
+        if (!adminDb) throw new Error("adminDb is null");
+
+        // Find active users via their virtual portfolios (most reliable discovery)
+        const knownUid = "SF87h3pQoxfkkFfD7zCSOXgtz5h1";
+        const knownDoc = await adminDb.collection('users').doc(knownUid).collection('settings').doc('notifications').get();
+        console.log(`Cron: Manual Check ${knownUid}: ${JSON.stringify(knownDoc.data())}`);
+
+        const vpSnapshot = await adminDb.collection('virtual_portfolio').get();
+        console.log(`Cron: Scanning ${vpSnapshot.docs.length} users with active portfolios...`);
+
+        const notificationPromises = vpSnapshot.docs.map(vDoc =>
+            adminDb!.collection('users').doc(vDoc.id).collection('settings').doc('notifications').get()
+        );
+        const notificationSnaps = await Promise.all(notificationPromises);
+
+        const validDocs = notificationSnaps.filter(s => s.exists && s.data()?.enabled === true);
+        console.log(`Cron: Found ${validDocs.length} active notification configs.`);
 
         if (validDocs.length === 0) return NextResponse.json({ message: "No active monitors found." });
 
@@ -28,6 +41,7 @@ export async function GET() {
 
         for (const doc of validDocs) {
             const data = doc.data();
+            if (!data) continue;
             const timeZone = data.timeZone || 'UTC';
 
             // Time Check Logic
@@ -38,9 +52,9 @@ export async function GET() {
             // Defaults: Night 00:00, Morning 06:00, Lunch 12:00, Evening 18:00
             const checks = [
                 { type: 'night', time: "00:00", field: 'lastNightCheck' },
-                { type: 'morning', time: data.morningTime || "06:00", field: 'lastMorningCheck' }, // Default changed to 6am
+                { type: 'morning', time: data.morningTime || "06:00", field: 'lastMorningCheck' },
                 { type: 'lunch', time: "12:00", field: 'lastLunchCheck' },
-                { type: 'evening', time: data.eveningTime || "18:00", field: 'lastEveningCheck' }  // Default changed to 6pm
+                { type: 'evening', time: data.eveningTime || "18:00", field: 'lastEveningCheck' }
             ];
 
             for (const check of checks) {
@@ -48,25 +62,20 @@ export async function GET() {
                 const checkMinutes = h * 60 + m;
 
                 // Trigger if past time AND not sent today
-                // Note: Night check (00:00) runs immediately at start of day
                 if (currentMinutes >= checkMinutes && data[check.field] !== userDateStr) {
                     eligibleUsers.push({ uid: doc.ref.parent.parent!.id, ref: doc.ref, data, type: check.type as any });
-                    break; // Only trigger one alert per cycle to avoid spam if cron is infrequent (though normally cron is frequent enough)
-                    // Actually, if we missed multiple, we might want to send the latest? 
-                    // Or just break to send the first pending one?
-                    // Let's break to be safe, process one at a time.
+                    break;
                 }
             }
         }
 
-        if (eligibleUsers.length === 0) return NextResponse.json({ message: "No alerts due." });
+        if (eligibleUsers.length === 0) return NextResponse.json({ message: "No alerts due.", now: now.toISOString() });
 
         // 2. Process Eligible Users
         const results = await Promise.all(eligibleUsers.map(async (user) => {
             console.log(`Generating reports for user ${user.uid} (${user.type})...`);
 
             let successCount = 0;
-
             let analysisResults: any[] = [];
 
             // Generate Reports for WL
@@ -74,7 +83,6 @@ export async function GET() {
                 try {
                     const analysis = await analyzeCrypto(ticker);
 
-                    // QUALITY CHECK: Only save reports with confirmed live data
                     if (analysis.verificationStatus.toLowerCase().includes("research")) {
                         console.warn(`Skipping unverified report for ${ticker} - Data source was research/fallback.`);
                         return;
@@ -82,7 +90,6 @@ export async function GET() {
 
                     analysisResults.push(analysis);
 
-                    // Save to Library (Firestore Admin)
                     await adminDb!.collection('intel_reports').add({
                         ...analysis,
                         userId: user.uid,
@@ -96,7 +103,6 @@ export async function GET() {
                 }
             }));
 
-            // 2b. Virtual Portfolio Manager
             if (successCount > 0) {
                 try {
                     await initVirtualPortfolio(user.uid);
@@ -106,7 +112,6 @@ export async function GET() {
                 }
             }
 
-            // Send Notification
             if (successCount > 0 && user.data.fcmToken) {
                 const titles = {
                     night: '🌙 Midnight Intelligence',
@@ -129,7 +134,9 @@ export async function GET() {
                 }
             }
 
-            // Update Status
+            const timeZone = user.data.timeZone || 'UTC';
+            const userDateStr = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+
             // Determine field name dynamically
             const fieldMap: Record<string, string> = {
                 night: 'lastNightCheck',
@@ -139,10 +146,12 @@ export async function GET() {
             };
             const field = fieldMap[user.type];
 
-            const timeZone = user.data.timeZone || 'UTC';
-            const userDateStr = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-
-            await user.ref.update({ [field]: userDateStr });
+            if (successCount > 0) {
+                await user.ref.update({ [field]: userDateStr });
+                console.log(`Successfully completed ${user.type} for ${user.uid}`);
+            } else {
+                console.warn(`No success in ${user.type} for ${user.uid}. Will retry on next cron.`);
+            }
 
             return { uid: user.uid, reportsGenerated: successCount };
         }));

@@ -13,6 +13,7 @@ import { triggerAITrading, resetAIChallenge } from "./actions";
 import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
 import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign, Sparkles, PackageSearch, Settings } from "lucide-react";
 import NotificationSettings from "@/components/NotificationSettings";
+import MonitoringStatus from "@/components/MonitoringStatus";
 
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -1018,6 +1019,11 @@ export default function Home() {
                             <p className="text-white font-mono font-bold">${Math.max(0, vpData.totalValue - vpData.cashBalance).toFixed(2)}</p>
                           </div>
                         </div>
+                      </div>
+
+                      {/* Monitoring & Research Status */}
+                      <div className="mb-8">
+                        <MonitoringStatus />
                       </div>
 
                       {/* AI History Chart */}
@@ -2191,25 +2197,27 @@ export default function Home() {
       </AnimatePresence>
 
       {/* Footer Info */}
-      {!result && !loading && (
-        <div className="mt-20 hidden md:grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
-            <ShieldCheck className="mx-auto mb-4 text-blue-400" size={32} />
-            <h4 className="font-bold mb-2">Safety First</h4>
-            <p className="text-xs text-slate-500">60% focus on fundamentals to ensure long-term value preservation.</p>
+      {
+        !result && !loading && (
+          <div className="mt-20 hidden md:grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
+              <ShieldCheck className="mx-auto mb-4 text-blue-400" size={32} />
+              <h4 className="font-bold mb-2">Safety First</h4>
+              <p className="text-xs text-slate-500">60% focus on fundamentals to ensure long-term value preservation.</p>
+            </div>
+            <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
+              <TrendingUp className="mx-auto mb-4 text-emerald-400" size={32} />
+              <h4 className="font-bold mb-2">Perfect Timing</h4>
+              <p className="text-xs text-slate-500">40% focus on technical indicators to optimize entry and exit points.</p>
+            </div>
+            <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
+              <Users className="mx-auto mb-4 text-purple-400" size={32} />
+              <h4 className="font-bold mb-2">Social Pulse</h4>
+              <p className="text-xs text-slate-500">Real-time analysis of Fear & Greed to capitalize on market sentiment.</p>
+            </div>
           </div>
-          <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
-            <TrendingUp className="mx-auto mb-4 text-emerald-400" size={32} />
-            <h4 className="font-bold mb-2">Perfect Timing</h4>
-            <p className="text-xs text-slate-500">40% focus on technical indicators to optimize entry and exit points.</p>
-          </div>
-          <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
-            <Users className="mx-auto mb-4 text-purple-400" size={32} />
-            <h4 className="font-bold mb-2">Social Pulse</h4>
-            <p className="text-xs text-slate-500">Real-time analysis of Fear & Greed to capitalize on market sentiment.</p>
-          </div>
-        </div>
-      )}
+        )
+      }
       {/* AI Agent Modal */}
       <AnimatePresence>
         {isAgentOpen && (
@@ -2325,6 +2333,6 @@ export default function Home() {
           </div>
         )}
       </AnimatePresence>
-    </main>
+    </main >
   );
 }
