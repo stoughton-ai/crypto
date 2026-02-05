@@ -1,4 +1,4 @@
-import { model } from "./gemini";
+import { generateContentWithFallback } from "./gemini";
 
 export interface TradeSuggestion {
   action: "BUY" | "SELL" | "SWITCH" | "HOLD";
@@ -64,8 +64,7 @@ export async function consultCryptoAgent(
   `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const text = await generateContentWithFallback(prompt);
     const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
     const parsed = JSON.parse(cleanJson) as AgentConsultationResult;
 

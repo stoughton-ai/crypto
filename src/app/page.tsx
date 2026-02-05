@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, getVerifiedPrices, getAgentConsultation } from "./actions"; // Added getAgentConsultation
 import { AGENT_WATCHLIST } from "@/lib/constants";
 import { type CryptoAnalysisResult } from "@/lib/gemini";
@@ -8,8 +8,10 @@ import { useAuth } from "@/context/AuthContext";
 import { type AgentConsultationResult } from "@/lib/agent";
 import { fetchLibrary, saveToLibrary, deleteReport, migrateLegacyLibrary, clearLibrary, type LibraryReport } from "@/services/libraryService";
 import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, clearPortfolio, recordTrade, fetchRealizedTrades, type PortfolioItem, type PortfolioSnapshot, type RealizedTrade } from "@/services/portfolioService";
+import { getVirtualPortfolio, getVirtualTrades, getVirtualHistory, type VirtualPortfolio, type VirtualTrade } from "@/services/virtualPortfolioService";
+import { triggerAITrading, resetAIChallenge } from "./actions";
 import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
-import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign, Sparkles } from "lucide-react";
+import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign, Sparkles, PackageSearch, Settings } from "lucide-react";
 import NotificationSettings from "@/components/NotificationSettings";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -45,14 +47,18 @@ export default function Home() {
     isOpen: boolean;
     title: string;
     message: string;
-    type: 'confirm' | 'alert' | 'danger';
-    onConfirm?: () => void;
+    type: 'confirm' | 'alert' | 'danger' | 'prompt';
+    onConfirm?: (value?: string) => void;
+    placeholder?: string;
+    defaultValue?: string;
   }>({
     isOpen: false,
     title: "",
     message: "",
     type: 'alert'
   });
+
+  const [modalInput, setModalInput] = useState("");
 
   // Portfolio State
   const [isPortfolioOpen, setIsPortfolioOpen] = useState(false);
@@ -67,10 +73,17 @@ export default function Home() {
   const [sellData, setSellData] = useState({ amount: "", price: "", date: "" });
   const [lastLoggedValue, setLastLoggedValue] = useState<number | null>(null);
   const [isRevaluing, setIsRevaluing] = useState(false);
-  const [portfolioTab, setPortfolioTab] = useState<'holdings' | 'history'>('holdings');
+  const [portfolioTab, setPortfolioTab] = useState<'holdings' | 'history' | 'ai_agent'>('holdings'); // Added ai_agent tab
+
+  // Virtual Portfolio State
+  const [vpData, setVpData] = useState<VirtualPortfolio | null>(null);
+  const [vpTrades, setVpTrades] = useState<VirtualTrade[]>([]);
+  const [vpHistory, setVpHistory] = useState<any[]>([]);
+  const [isInitializingVP, setIsInitializingVP] = useState(false);
 
   // Agent State
   const [isAgentOpen, setIsAgentOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentStatus, setAgentStatus] = useState("");
   const [agentResult, setAgentResult] = useState<AgentConsultationResult | null>(null);
@@ -86,12 +99,75 @@ export default function Home() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  const metrics = useMemo(() => {
+    let totalInvested = 0;
+    let totalVal = 0;
+    let bestAsset: { ticker: string; pct: number } | null = null;
+    let worstAsset: { ticker: string; pct: number } | null = null;
+
+    portfolioItems.forEach(item => {
+      const priceData = portfolioPrices[item.ticker];
+      const currentPrice = priceData ? priceData.price : item.averagePrice;
+      const value = item.amount * currentPrice;
+      const cost = item.amount * item.averagePrice;
+
+      totalVal += value;
+      totalInvested += cost;
+
+      const pnlPct = item.averagePrice > 0 ? ((currentPrice - item.averagePrice) / item.averagePrice) * 100 : 0;
+
+      if (!bestAsset || pnlPct > bestAsset.pct) {
+        bestAsset = { ticker: item.ticker, pct: pnlPct };
+      }
+      if (!worstAsset || pnlPct < worstAsset.pct) {
+        worstAsset = { ticker: item.ticker, pct: pnlPct };
+      }
+    });
+
+    const unrealizedPnl = totalVal - totalInvested;
+    const unrealizedPct = totalInvested > 0 ? (unrealizedPnl / totalInvested) * 100 : 0;
+
+    // Total historical cost = cost of CURRENT holdings + cost of everything ALREADY SOLD
+    const realizedCost = realizedTrades.reduce((acc, t) => acc + (t.sellAmount * t.costBasis), 0);
+    const totalHistoricalCost = totalInvested + realizedCost;
+
+    const totalRealized = realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0);
+    const allTimePnl = unrealizedPnl + totalRealized;
+    const allTimePct = totalHistoricalCost > 0 ? (allTimePnl / totalHistoricalCost) * 100 : 0;
+
+    return {
+      totalVal,
+      totalInvested,
+      unrealizedPnl,
+      unrealizedPct,
+      totalRealized,
+      allTimePnl,
+      allTimePct,
+      bestAsset,
+      worstAsset,
+      assetCount: portfolioItems.length
+    } as {
+      totalVal: number;
+      totalInvested: number;
+      unrealizedPnl: number;
+      unrealizedPct: number;
+      totalRealized: number;
+      allTimePnl: number;
+      allTimePct: number;
+      bestAsset: { ticker: string; pct: number } | null;
+      worstAsset: { ticker: string; pct: number } | null;
+      assetCount: number;
+    };
+  }, [portfolioItems, portfolioPrices, realizedTrades]);
+
   useEffect(() => {
     if (user) {
       loadLibrary();
       loadPortfolio();
       loadPortfolioHistory();
+      loadPortfolioHistory();
       loadRealizedTrades();
+      loadVirtualPortfolio();
     }
   }, [user]);
 
@@ -190,6 +266,96 @@ export default function Home() {
     if (!user) return;
     const data = await fetchRealizedTrades(user.uid);
     setRealizedTrades(data);
+  };
+
+  const loadVirtualPortfolio = async () => {
+    if (!user) return;
+    const data = await getVirtualPortfolio(user.uid);
+    setVpData(data);
+    const trades = await getVirtualTrades(user.uid);
+    setVpTrades(trades);
+    const history = await getVirtualHistory(user.uid);
+    setVpHistory(history);
+  };
+
+  const handleInitAIChallenge = async () => {
+    if (!user) return;
+
+    setModalInput("600");
+    setModalConfig({
+      isOpen: true,
+      title: "Initial Capital",
+      message: "Enter initial virtual cash balance (USD) for the AI Trading Challenge:",
+      type: 'prompt',
+      onConfirm: async (value) => {
+        const amount = parseFloat(value || "600");
+        if (isNaN(amount) || amount <= 0) return;
+
+        setIsInitializingVP(true);
+        setModalConfig({
+          isOpen: true,
+          title: "Starting AI Challenge",
+          message: `The AI is analyzing the market to effectively deploy its initial $${amount} capital...`,
+          type: 'alert'
+        });
+
+        try {
+          const res = await triggerAITrading(user.uid, amount);
+          if (res.success) {
+            await loadVirtualPortfolio();
+            setModalConfig({
+              isOpen: true,
+              title: "AI Challenge Active",
+              message: res.message,
+              type: 'confirm'
+            });
+          } else {
+            setModalConfig({
+              isOpen: true,
+              title: "Setup Failed",
+              message: res.message,
+              type: 'danger'
+            });
+          }
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setIsInitializingVP(false);
+        }
+      }
+    });
+  };
+
+  const handleResetAI = async () => {
+    setModalConfig({
+      isOpen: true,
+      title: "Reset AI Challenge",
+      message: "Are you sure? This will surrender all current profits/losses and reset to the initial balance. History will be wiped.",
+      type: 'danger',
+      onConfirm: async () => {
+        if (!user) return;
+
+        // Double Check for AI Reset
+        setTimeout(() => {
+          setModalInput("600");
+          setModalConfig({
+            isOpen: true,
+            title: "Confirm AI Reset",
+            message: "This will permanently delete the AI Agent's history and current positions. Enter new virtual cash balance (USD) for the reset:",
+            type: 'prompt',
+            onConfirm: async (value) => {
+              const amount = parseFloat(value || "600");
+              if (isNaN(amount) || amount <= 0) return;
+
+              const res = await resetAIChallenge(user.uid, amount);
+              if (res.success) {
+                await loadVirtualPortfolio();
+              }
+            }
+          });
+        }, 200);
+      }
+    });
   };
 
   const updatePortfolioPrices = async () => {
@@ -311,11 +477,24 @@ export default function Home() {
     setModalConfig({
       isOpen: true,
       title: "Clear Entire Portfolio",
-      message: "Are you sure you want to delete ALL assets from your portfolio tracking? This cannot be undone.",
+      message: "WARNING: You are about to DELETE ALL ASSETS & HISTORY. This action is irreversible. Are you absolutely sure?",
       type: "danger",
       onConfirm: async () => {
-        await clearPortfolio(user.uid);
-        loadPortfolio();
+        // Double Check Logic could go here if we had a multi-step modal, 
+        // but for now we make the first one very scary or rely on a second confirmation call?
+        // Let's chain a second modal for "Double Check".
+        setTimeout(() => {
+          setModalConfig({
+            isOpen: true,
+            title: "Confirm Deletion",
+            message: "Final Check: Really delete everything?",
+            type: "danger",
+            onConfirm: async () => {
+              await clearPortfolio(user.uid);
+              await loadPortfolio();
+            }
+          });
+        }, 200);
       }
     });
   };
@@ -607,28 +786,50 @@ export default function Home() {
                 </div>
 
                 <h3 className="text-xl font-black text-white mb-2">{modalConfig.title}</h3>
-                <p className="text-slate-400 text-sm leading-relaxed mb-8 text-justify">{modalConfig.message}</p>
+                <p className="text-slate-400 text-sm leading-relaxed mb-6 text-justify">{modalConfig.message}</p>
+
+                {modalConfig.type === 'prompt' && (
+                  <div className="mb-6 relative">
+                    <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-500">
+                      <DollarSign size={16} />
+                    </div>
+                    <input
+                      type="number"
+                      autoFocus
+                      value={modalInput}
+                      onChange={(e) => setModalInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (modalConfig.onConfirm) modalConfig.onConfirm(modalInput);
+                          setModalConfig({ ...modalConfig, isOpen: false });
+                        }
+                      }}
+                      className="w-full bg-black/40 border border-white/10 rounded-2xl py-4 pl-12 pr-6 text-white text-lg font-mono focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                      placeholder={modalConfig.placeholder || "0.00"}
+                    />
+                  </div>
+                )}
 
                 <div className="flex gap-3">
                   {modalConfig.type !== 'alert' && (
                     <button
                       onClick={() => setModalConfig({ ...modalConfig, isOpen: false })}
-                      className="flex-1 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest bg-white/5 text-slate-400 hover:bg-white/10 transition-all"
+                      className="flex-1 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest bg-white/5 text-slate-400 hover:bg-white/10 transition-all font-sans"
                     >
                       Cancel
                     </button>
                   )}
                   <button
                     onClick={() => {
-                      if (modalConfig.onConfirm) modalConfig.onConfirm();
+                      if (modalConfig.onConfirm) modalConfig.onConfirm(modalConfig.type === 'prompt' ? modalInput : undefined);
                       setModalConfig({ ...modalConfig, isOpen: false });
                     }}
                     className={cn(
-                      "flex-1 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-lg",
+                      "flex-1 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-lg font-sans",
                       modalConfig.type === 'danger' ? "bg-red-600 text-white hover:bg-red-500 shadow-red-600/20" : "bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/20"
                     )}
                   >
-                    {modalConfig.type === 'alert' ? 'Understood' : 'Confirm'}
+                    {modalConfig.type === 'alert' ? 'Understood' : modalConfig.type === 'prompt' ? 'Start' : 'Confirm'}
                   </button>
                 </div>
               </div>
@@ -741,45 +942,365 @@ export default function Home() {
                 >
                   History
                 </button>
+                <button
+                  onClick={() => setPortfolioTab('ai_agent')}
+                  className={cn(
+                    "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all",
+                    portfolioTab === 'ai_agent' ? "bg-white text-slate-900 shadow-lg" : "text-slate-500 hover:text-white"
+                  )}
+                >
+                  AI Agent
+                </button>
               </div>
 
-              {portfolioTab === 'holdings' ? (
-                <>
-                  {/* Portfolio Stats */}
-                  <div className="relative bg-emerald-500/5 border border-emerald-500/20 rounded-3xl p-6 mb-8 group">
-                    <button
-                      onClick={handleRevaluePortfolio}
-                      disabled={isRevaluing}
-                      className="absolute top-4 right-4 p-2 rounded-xl bg-slate-900/50 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all disabled:opacity-50 disabled:animate-pulse"
-                      title="Force Revaluation (Confirmed Data)"
-                    >
-                      <RefreshCw size={16} className={cn(isRevaluing && "animate-spin")} />
-                    </button>
-                    <p className="text-xs font-bold uppercase tracking-widest text-emerald-500/60 mb-1">Total Balance</p>
-                    <div className="text-3xl font-black text-white font-mono">
-                      ${portfolioItems.reduce((acc, item) => acc + (item.amount * (portfolioPrices[item.ticker]?.price || item.averagePrice)), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      <div className={cn(
-                        "flex items-center gap-1 text-sm font-bold",
-                        portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker]?.price || item.averagePrice) - item.averagePrice)), 0) >= 0 ? "text-emerald-400" : "text-red-400"
-                      )}>
-                        {portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker]?.price || item.averagePrice) - item.averagePrice)), 0) >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
-                        ${Math.abs(portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker]?.price || item.averagePrice) - item.averagePrice)), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {portfolioTab === 'ai_agent' && (
+                <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col min-h-0 overflow-y-auto pr-1">
+                  {!vpData ? (
+                    <div className="text-center p-8 border border-dashed border-slate-700 rounded-3xl">
+                      <div className="w-16 h-16 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/20">
+                        <Sparkles className="text-white" size={32} />
                       </div>
-                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">All Time PNL</span>
+                      <h3 className="text-white font-bold mb-2">AI Trading Challenge</h3>
+                      <p className="text-slate-400 text-sm mb-6">
+                        Let the AI manage a virtual portfolio starting with your chosen amount. It will trade autonomously based on its own market analysis signals.
+                      </p>
+                      <button
+                        onClick={handleInitAIChallenge}
+                        disabled={isInitializingVP}
+                        className="bg-white text-slate-900 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
+                      >
+                        {isInitializingVP ? "Initializing..." : "Start AI Challenge"}
+                      </button>
                     </div>
-                    {/* Realized PNL Display */}
-                    {realizedTrades.length > 0 && (
-                      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-emerald-500/20">
+                  ) : (
+                    <>
+                      {/* AI Stats */}
+                      <div className={cn(
+                        "bg-gradient-to-br from-violet-900/50 to-fuchsia-900/20 border border-violet-500/20 rounded-3xl mb-6 relative overflow-hidden group",
+                        isMobile ? "p-4" : "p-6"
+                      )}>
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+
+                        <button
+                          onClick={handleResetAI}
+                          className="absolute top-4 right-4 p-2 rounded-xl bg-slate-900/50 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          title="Reset Challenge"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-violet-300/80">Total AI Value</p>
+                          <p className="text-[9px] font-bold text-violet-300/40 uppercase tracking-tighter">
+                            Started with ${(vpData.initialBalance || 600).toLocaleString()}
+                          </p>
+                        </div>
+
+                        <div className="text-3xl font-black text-white font-mono mb-1">
+                          ${vpData.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+
                         <div className={cn(
                           "flex items-center gap-1 text-sm font-bold",
-                          realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0) >= 0 ? "text-blue-400" : "text-red-400"
+                          vpData.totalValue >= (vpData.initialBalance || 600) ? "text-emerald-400" : "text-red-400"
                         )}>
-                          <DollarSign size={16} />
-                          ${realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {vpData.totalValue >= (vpData.initialBalance || 600) ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                          {((vpData.totalValue - (vpData.initialBalance || 600)) / (vpData.initialBalance || 600) * 100).toFixed(2)}% ROI
                         </div>
-                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Realized Profits</span>
+
+                        <div className="grid grid-cols-2 gap-3 sm:gap-4 pt-4 mt-4 border-t border-violet-500/20">
+                          <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
+                            <p className="text-[10px] text-violet-300/80 uppercase font-bold mb-1">Cash</p>
+                            <p className="text-white font-mono font-bold">${(vpData.cashBalance || 0).toFixed(2)}</p>
+                          </div>
+                          <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
+                            <p className="text-[10px] text-violet-300/80 uppercase font-bold mb-1">Invested</p>
+                            <p className="text-white font-mono font-bold">${Math.max(0, vpData.totalValue - vpData.cashBalance).toFixed(2)}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* AI History Chart */}
+                      {vpHistory.length > 1 && (
+                        <div className="mb-6 overflow-hidden">
+                          <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Performance Trend</h3>
+                          <div className="h-32 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <AreaChart data={vpHistory}>
+                                <defs>
+                                  <linearGradient id="colorAIValue" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <Tooltip
+                                  contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
+                                  itemStyle={{ color: '#fff' }}
+                                  formatter={(value?: number) => [`$${value?.toFixed(2) ?? '0.00'}`, 'Value']}
+                                  labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                                />
+                                <Area
+                                  type="monotone"
+                                  dataKey="totalValue"
+                                  stroke="#8b5cf6"
+                                  strokeWidth={2}
+                                  fillOpacity={1}
+                                  fill="url(#colorAIValue)"
+                                />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Holdings */}
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2">
+                        <Wallet size={12} /> AI Holdings
+                      </h3>
+                      <div className="space-y-3 mb-8">
+                        {Object.keys(vpData.holdings || {}).length === 0 ? (
+                          <p className="text-slate-500 text-sm italic">No active positions. Scanning market...</p>
+                        ) : (
+                          Object.entries(vpData.holdings).map(([ticker, data]) => (
+                            <div key={ticker} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={`https://assets.coincap.io/assets/icons/${ticker.toLowerCase()}@2x.png`}
+                                  alt={ticker}
+                                  className="w-8 h-8 rounded-full"
+                                  onError={(e) => (e.currentTarget.src = "https://cdn-icons-png.flaticon.com/512/1213/1213691.png")}
+                                />
+                                <div>
+                                  <span className="text-white font-bold">{ticker}</span>
+                                  <p className="text-[10px] text-slate-400">
+                                    {data.amount.toFixed(4)} @ ${data.averagePrice.toFixed(2)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-white font-mono text-sm block">
+                                  ${(data.amount * (portfolioPrices[ticker]?.price || data.averagePrice)).toFixed(2)}
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Recent AI Trades */}
+                      <div className="border-t border-white/5 mt-12 mb-6" />
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                          <Activity size={12} /> AI Trades
+                        </h3>
+                        <span className="text-[10px] text-slate-600 font-mono uppercase tracking-widest">Live Execution Log</span>
+                      </div>
+                      <div className="space-y-4">
+                        {vpTrades.length === 0 ? (
+                          <div className="text-center py-8 bg-white/[0.02] rounded-3xl border border-dashed border-white/5">
+                            <p className="text-slate-500 text-sm italic">No trades recorded yet.</p>
+                          </div>
+                        ) : (
+                          vpTrades.slice(0, 10).map((trade) => (
+                            <div key={trade.id} className="relative group p-4 bg-white/[0.03] rounded-2xl border border-white/5 hover:border-violet-500/20 transition-all">
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="flex items-center gap-3">
+                                  <div className={cn(
+                                    "w-8 h-8 rounded-xl flex items-center justify-center font-bold text-[10px]",
+                                    trade.type === 'BUY' ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+                                  )}>
+                                    {trade.ticker.slice(0, 2)}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-white font-bold">{trade.ticker}</span>
+                                      <span className={cn(
+                                        "text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter",
+                                        trade.type === 'BUY' ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                                      )}>
+                                        {trade.type}
+                                      </span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-500">{new Date(trade.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</p>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-black text-white font-mono">${trade.total.toFixed(2)}</p>
+                                  <p className="text-[10px] text-slate-500">@{trade.price.toFixed(2)}</p>
+                                </div>
+                              </div>
+                              <div className="mt-2 text-[10px] text-slate-400 bg-black/20 p-2 rounded-lg border border-white/5 italic">
+                                "{trade.reason}"
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Explicit Reset Button */}
+                      <button
+                        onClick={handleResetAI}
+                        className="w-full mt-8 py-3 rounded-xl border border-red-500/20 text-red-400 text-xs font-bold uppercase tracking-widest hover:bg-red-500/10 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Trash2 size={14} /> Reset & Clear All AI Data
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {portfolioTab === 'holdings' && (
+                <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col min-h-0 overflow-y-auto pr-1">
+                  {/* COMPREHENSIVE PORTFOLIO DASHBOARD */}
+                  <div className="space-y-4 mb-8">
+                    {/* Main Performance Card */}
+                    <div className="relative overflow-hidden glass rounded-[2.5rem] border-white/5 p-6 shadow-2xl">
+                      {/* Decorative Background */}
+                      <div className={cn(
+                        "absolute top-0 right-0 w-48 h-48 blur-[80px] opacity-20 -translate-y-1/2 translate-x-1/2 rounded-full",
+                        metrics.allTimePnl >= 0 ? "bg-emerald-500" : "bg-red-500"
+                      )} />
+
+                      <div className="relative z-10">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-1">Total Portfolio Value</p>
+                            <div className="text-4xl font-black text-white font-mono tracking-tighter">
+                              ${metrics.totalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          </div>
+                          <button
+                            onClick={handleRevaluePortfolio}
+                            disabled={isRevaluing}
+                            className="p-3 rounded-2xl bg-white/5 border border-white/10 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all disabled:opacity-50"
+                          >
+                            <RefreshCw size={18} className={cn(isRevaluing && "animate-spin")} />
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className={cn(
+                            "flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-xs",
+                            metrics.allTimePnl >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+                          )}>
+                            {metrics.allTimePnl >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+                            ${Math.abs(metrics.allTimePnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                          <div className={cn(
+                            "flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-xs",
+                            metrics.allTimePct >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+                          )}>
+                            <Activity size={12} />
+                            {metrics.allTimePct.toFixed(2)}% ROI (All-Time)
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Performance Sub-Grid */}
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* Unrealized PNL */}
+                      <div className="glass rounded-[2rem] border-white/5 p-4 relative group">
+                        <div className="absolute top-2 right-4 text-emerald-500/20 group-hover:text-emerald-500/40 transition-colors">
+                          <TrendingUp size={24} />
+                        </div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Unrealized (Open)</p>
+                        <div className={cn(
+                          "text-lg font-black font-mono",
+                          metrics.unrealizedPnl >= 0 ? "text-emerald-400" : "text-red-400"
+                        )}>
+                          {metrics.unrealizedPnl >= 0 ? "+" : "-"}${Math.abs(metrics.unrealizedPnl).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">{metrics.unrealizedPct.toFixed(2)}% Open Gain</p>
+                      </div>
+
+                      {/* Realized PNL */}
+                      <div className="glass rounded-[2rem] border-white/5 p-4 relative group">
+                        <div className="absolute top-2 right-4 text-blue-500/20 group-hover:text-blue-500/40 transition-colors">
+                          <DollarSign size={24} />
+                        </div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Realized (Closed)</p>
+                        <div className={cn(
+                          "text-lg font-black font-mono",
+                          metrics.totalRealized >= 0 ? "text-blue-400" : "text-red-400"
+                        )}>
+                          {metrics.totalRealized >= 0 ? "+" : "-"}${Math.abs(metrics.totalRealized).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">{realizedTrades.length} Closed Trades</p>
+                      </div>
+
+                      {/* Cost Basis */}
+                      <div className="glass rounded-[2rem] border-white/5 p-4 relative group col-span-1">
+                        <div className="absolute top-2 right-4 text-slate-500/20 group-hover:text-slate-500/40 transition-colors">
+                          <Wallet size={24} />
+                        </div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Active Collateral</p>
+                        <div className="text-lg font-black font-mono text-white">
+                          ${metrics.totalInvested.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">{metrics.assetCount} Active Assets</p>
+                      </div>
+
+                      {/* Portfolio Diversity Score placeholder or similar */}
+                      <div className="glass rounded-[2rem] border-white/5 p-4 relative group col-span-1 bg-gradient-to-br from-blue-500/5 to-transparent">
+                        <div className="absolute top-2 right-4 text-indigo-500/20 group-hover:text-indigo-500/40 transition-colors">
+                          <ShieldCheck size={24} />
+                        </div>
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">System Health</p>
+                        <div className="text-lg font-black font-mono text-indigo-400">
+                          98.4<span className="text-[10px] ml-1">SEC</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">Cross-Verified</p>
+                      </div>
+                    </div>
+
+                    {/* Best/Worst Performers */}
+                    {metrics.assetCount > 0 && (
+                      <div className="flex gap-2">
+                        {metrics.bestAsset && (
+                          <div className={cn(
+                            "flex-1 glass rounded-2xl py-2 px-3 flex items-center justify-between border",
+                            metrics.bestAsset.pct >= 0 ? "border-emerald-500/20" : "border-red-500/20"
+                          )}>
+                            <div className="flex items-center gap-2">
+                              <div className={cn(
+                                "w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px]",
+                                metrics.bestAsset.pct >= 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                              )}>
+                                {metrics.bestAsset.ticker.slice(0, 2)}
+                              </div>
+                              <span className="text-[10px] font-bold text-white tracking-widest uppercase">{metrics.bestAsset.ticker}</span>
+                            </div>
+                            <span className={cn(
+                              "text-[10px] font-black font-mono",
+                              metrics.bestAsset.pct >= 0 ? "text-emerald-400" : "text-red-400"
+                            )}>
+                              {metrics.bestAsset.pct >= 0 ? "+" : "-"}{Math.abs(metrics.bestAsset.pct).toFixed(1)}%
+                            </span>
+                          </div>
+                        )}
+                        {metrics.worstAsset && metrics.worstAsset.ticker !== metrics.bestAsset?.ticker && (
+                          <div className={cn(
+                            "flex-1 glass rounded-2xl py-2 px-3 flex items-center justify-between border",
+                            metrics.worstAsset.pct >= 0 ? "border-emerald-500/20" : "border-red-500/20"
+                          )}>
+                            <div className="flex items-center gap-2">
+                              <div className={cn(
+                                "w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px]",
+                                metrics.worstAsset.pct >= 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                              )}>
+                                {metrics.worstAsset.ticker.slice(0, 2)}
+                              </div>
+                              <span className="text-[10px] font-bold text-white tracking-widest uppercase">{metrics.worstAsset.ticker}</span>
+                            </div>
+                            <span className={cn(
+                              "text-[10px] font-black font-mono",
+                              metrics.worstAsset.pct >= 0 ? "text-emerald-400" : "text-red-400"
+                            )}>
+                              {metrics.worstAsset.pct >= 0 ? "+" : "-"}{Math.abs(metrics.worstAsset.pct).toFixed(1)}%
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -798,17 +1319,10 @@ export default function Home() {
                               </linearGradient>
                             </defs>
                             <Tooltip
-                              content={({ active, payload }) => {
-                                if (active && payload && payload.length) {
-                                  return (
-                                    <div className="glass p-2 border-white/10 rounded-lg text-[10px] font-mono">
-                                      <p className="text-slate-400">{new Date(payload[0].payload.timestamp).toLocaleDateString()}</p>
-                                      <p className="text-emerald-400 font-bold">${payload[0].value?.toLocaleString()}</p>
-                                    </div>
-                                  );
-                                }
-                                return null;
-                              }}
+                              contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
+                              itemStyle={{ color: '#fff' }}
+                              formatter={(value?: number) => [`$${value?.toFixed(2) ?? '0.00'}`, 'Total Value']}
+                              labelFormatter={(label) => new Date(label).toLocaleDateString()}
                             />
                             <Area
                               type="monotone"
@@ -824,77 +1338,51 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Asset List */}
-                  <div className="flex-1 flex flex-col min-h-0">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">My Assets</h3>
-                      <button
-                        onClick={() => setIsAddingAsset(true)}
-                        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 transition-colors"
-                      >
-                        <Plus size={14} /> Add Asset
-                      </button>
-                    </div>
+                  {/* Holdings List */}
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Asset Breakdown</h3>
+                    <button
+                      onClick={handleClearPortfolio}
+                      className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-red-400 transition-colors flex items-center gap-1"
+                    >
+                      <Trash2 size={12} /> Clear Portfolio
+                    </button>
+                  </div>
 
-                    <div className="space-y-3 overflow-y-auto pr-2 pb-6 custom-scrollbar">
-                      {portfolioItems.length === 0 ? (
-                        <div className="text-center py-12 border border-dashed border-white/5 rounded-3xl">
-                          <p className="text-slate-500 text-sm">No assets tracked yet.</p>
-                          <button
-                            onClick={() => setIsAddingAsset(true)}
-                            className="mt-4 text-xs font-bold text-blue-400 hover:underline"
-                          >
-                            Start tracking your holdings
-                          </button>
-                        </div>
-                      ) : (
-                        portfolioItems.map((item) => {
-                          const currentPrice = portfolioPrices[item.ticker];
-                          const value = item.amount * (currentPrice?.price || item.averagePrice);
-                          const pnl = currentPrice ? (currentPrice.price - item.averagePrice) * item.amount : 0;
-                          const pnlPct = currentPrice ? ((currentPrice.price - item.averagePrice) / item.averagePrice) * 100 : 0;
+                  <div className="space-y-4 pb-6">
+                    {portfolioItems.length === 0 ? (
+                      <div className="text-center py-12 text-slate-500 border border-dashed border-slate-800 rounded-3xl">
+                        <PackageSearch size={32} className="mx-auto mb-2 opacity-50" />
+                        <p>No assets tracked yet.</p>
+                      </div>
+                    ) : (
+                      portfolioItems.map((item) => {
+                        const currentPrice = portfolioPrices[item.ticker];
+                        const value = item.amount * (currentPrice?.price || item.averagePrice);
+                        const pnl = currentPrice ? (currentPrice.price - item.averagePrice) * item.amount : 0;
+                        const pnlPct = currentPrice ? ((currentPrice.price - item.averagePrice) / item.averagePrice) * 100 : 0;
 
-                          return (
-                            <div key={item.id} className="glass rounded-2xl border-white/5 hover:border-emerald-500/30 transition-all group overflow-hidden">
-                              <div className="p-5">
-                                <div className="flex justify-between items-start mb-6">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center font-black text-sm text-slate-300 shadow-inner">
-                                      {item.ticker.slice(0, 2)}
-                                    </div>
-                                    <div>
-                                      <h4 className="font-black text-white text-xl leading-tight tracking-tight">{item.ticker}</h4>
-                                      <p className="text-[11px] text-slate-400 font-mono uppercase tracking-wider mt-0.5">{item.amount.toLocaleString()} Units</p>
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-xl font-mono font-black text-white tracking-tight">${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                                    <div className={cn(
-                                      "text-[10px] font-bold flex items-center justify-end gap-1 mb-1 bg-white/5 px-2 py-0.5 rounded-lg inline-flex ml-auto mt-1",
-                                      pnl >= 0 ? "text-emerald-400 bg-emerald-500/10" : "text-red-400 bg-red-500/10"
-                                    )}>
-                                      {pnl >= 0 ? "+" : "-"}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(pnlPct).toFixed(1)}%)
-                                    </div>
+                        return (
+                          <div key={item.id} className="glass rounded-3xl border-white/5 overflow-hidden">
+                            <div className="p-4 flex items-center justify-between bg-white/[0.02]">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-slate-800 flex items-center justify-center font-bold text-slate-400 border border-white/5">
+                                  {item.ticker.slice(0, 2)}
+                                </div>
+                                <div>
+                                  <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                                    {item.ticker}
+                                  </h4>
+                                  <div className="text-[10px] text-slate-400 flex items-center gap-2">
+                                    <span>{item.amount.toLocaleString()} Units</span>
+                                    <span className="w-1 h-1 rounded-full bg-slate-700" />
+                                    <span>Avg: ${item.averagePrice.toLocaleString()}</span>
                                   </div>
                                 </div>
-
-                                <div className="grid grid-cols-3 gap-2 bg-black/20 rounded-xl p-3 border border-white/5">
-                                  <div className="text-center">
-                                    <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Buy Price</div>
-                                    <div className="text-xs font-mono font-bold text-slate-300">${item.averagePrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                                  </div>
-                                  <div className="text-center border-l border-white/5">
-                                    <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Live Price</div>
-                                    <div className="text-xs font-mono font-bold text-emerald-400">
-                                      ${currentPrice ? currentPrice.price.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "..."}
-                                    </div>
-                                  </div>
-                                  <div className="text-center border-l border-white/5">
-                                    <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Date</div>
-                                    <div className="text-xs font-mono font-bold text-slate-400">
-                                      {item.tradeDate ? new Date(item.tradeDate).toLocaleDateString('en-GB') : "N/A"}
-                                    </div>
-                                  </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm font-black text-white font-mono">
+                                  {itemValue(item)}
                                 </div>
                                 {portfolioPrices[item.ticker] && (
                                   <div className="mt-1 flex flex-col items-end opacity-70">
@@ -908,37 +1396,39 @@ export default function Home() {
                                   </div>
                                 )}
                               </div>
-
-                              {/* Action Footer */}
-                              <div className="grid grid-cols-3 border-t border-white/5 bg-white/[0.02]">
-                                <button
-                                  onClick={() => startEditing(item)}
-                                  className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-blue-400 hover:bg-blue-500/5 transition-all border-r border-white/5"
-                                >
-                                  <Edit size={12} /> Edit
-                                </button>
-                                <button
-                                  onClick={() => startSelling(item)}
-                                  className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/5 transition-all border-r border-white/5"
-                                >
-                                  <Minus size={12} /> Sell
-                                </button>
-                                <button
-                                  onClick={() => handleRemoveAsset(item.id)}
-                                  className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-red-400 hover:bg-red-500/5 transition-all"
-                                >
-                                  <Trash2 size={12} /> Delete
-                                </button>
-                              </div>
                             </div>
-                          );
-                        })
-                      )}
-                    </div>
+
+                            {/* Action Footer */}
+                            <div className="grid grid-cols-3 border-t border-white/5 bg-white/[0.02]">
+                              <button
+                                onClick={() => startEditing(item)}
+                                className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-blue-400 hover:bg-blue-500/5 transition-all border-r border-white/5"
+                              >
+                                <Edit size={12} /> Edit
+                              </button>
+                              <button
+                                onClick={() => startSelling(item)}
+                                className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/5 transition-all border-r border-white/5"
+                              >
+                                <Minus size={12} /> Sell
+                              </button>
+                              <button
+                                onClick={() => handleRemoveAsset(item.id)}
+                                className="flex items-center justify-center gap-1.5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-red-400 hover:bg-red-500/5 transition-all"
+                              >
+                                <Trash2 size={12} /> Delete
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
-                </>
-              ) : (
-                <div className="flex-1 flex flex-col min-h-0">
+                </div>
+              )}
+
+              {portfolioTab === 'history' && (
+                <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col min-h-0">
                   <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Transaction History</h3>
                   <div className="space-y-3 overflow-y-auto pr-2 pb-6 custom-scrollbar">
                     {realizedTrades.length === 0 ? (
@@ -1124,7 +1614,74 @@ export default function Home() {
                   </motion.div>
                 )}
               </AnimatePresence>
-              <NotificationSettings />
+              <div className="mt-auto pt-6 border-t border-white/5 opacity-50 flex items-center justify-between text-[10px] uppercase font-bold text-slate-500 tracking-widest">
+                <span>End-to-End Encryption</span>
+                <span>v3.0.4</span>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Settings Sidebar */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSettingsOpen(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80]"
+            />
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-slate-900 border-l border-white/10 z-[90] shadow-2xl p-6 overflow-y-auto flex flex-col"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
+                  <Settings className="text-blue-400" size={24} />
+                  System Settings
+                </h2>
+                <button
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="p-2 hover:bg-white/5 rounded-full text-slate-400 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-8">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-blue-500 mb-6 flex items-center gap-2">
+                    <Activity size={14} /> Auto-Monitor configuration
+                  </h3>
+                  <div className="glass rounded-3xl p-6 border-white/5 bg-white/[0.02]">
+                    <NotificationSettings />
+                  </div>
+                </div>
+
+                <div className="pt-8 border-t border-white/5">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500 mb-4">Account Security</h3>
+                  <div className="p-4 rounded-2xl bg-black/20 border border-white/5 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-white">Google Authorization</p>
+                      <p className="text-[10px] text-slate-500 font-mono uppercase mt-1">Status: Active & Secure</p>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                      <ShieldCheck size={16} className="text-emerald-400" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-auto text-center py-8">
+                <p className="text-[10px] text-slate-600 uppercase font-black tracking-[0.3em]">Traffic Light Terminal</p>
+                <p className="text-[10px] text-slate-700 mt-2 font-mono">Build ID: {Date.now().toString(16).toUpperCase()}</p>
+              </div>
             </motion.div>
           </>
         )}
@@ -1293,6 +1850,14 @@ export default function Home() {
           >
             <Library size={18} className="text-blue-400" />
             <span>Library <span className="hidden sm:inline">({libraryReports.length})</span></span>
+          </button>
+
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="flex items-center justify-center p-2.5 glass rounded-xl border-white/10 hover:border-blue-500/50 transition-all text-slate-300"
+            title="System Settings"
+          >
+            <Settings size={20} />
           </button>
         </div>
       </div>

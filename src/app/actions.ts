@@ -1,9 +1,10 @@
 "use server";
 
-import { model, type CryptoAnalysisResult } from "@/lib/gemini";
+import { model, generateContentWithFallback, type CryptoAnalysisResult } from "@/lib/gemini";
 import { consultCryptoAgent, type AgentConsultationResult } from "@/lib/agent";
 import { type PortfolioItem } from "@/services/portfolioService";
 import { AGENT_WATCHLIST } from "@/lib/constants";
+import { initVirtualPortfolio, executeVirtualTrades, resetVirtualPortfolio } from "@/services/virtualPortfolioAdmin";
 
 /**
  * Source 1: CoinGecko (Historical + Metadata + Price)
@@ -243,8 +244,7 @@ export async function analyzeCrypto(ticker: string, historyContextString?: strin
   `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+    const responseText = await generateContentWithFallback(prompt);
 
     // Clean up the response if it contains markdown code blocks
     const cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -399,4 +399,51 @@ export async function getAgentConsultation(
   // So if we pass the detailed object, `verifiedPrices` in the result will be detailed.
   // This is perfect for the UI.
   return await consultCryptoAgent(portfolioContext, prices);
+}
+
+/**
+ * Manually trigger the AI Agent to analyze the market and trade for the Virtual Portfolio.
+ * Useful for the initial kickstart or testing.
+ */
+export async function triggerAITrading(userId: string, initialAmount: number = 600) {
+  try {
+    // 1. Analyze Market
+    const analysisResults: any[] = [];
+    await Promise.all(AGENT_WATCHLIST.map(async (ticker) => {
+      try {
+        const analysis = await analyzeCrypto(ticker);
+        // We allow "research" status for manual triggers if needed, or filter?
+        // Let's filter to be safe/consistent with Cron
+        if (!analysis.verificationStatus.toLowerCase().includes("research")) {
+          analysisResults.push(analysis);
+        }
+      } catch (e) {
+        console.error(`Analysis failed for ${ticker}`, e);
+      }
+    }));
+
+    if (analysisResults.length === 0) return { success: false, message: "No verified market data available." };
+
+    // 2. Init & Execute
+    await initVirtualPortfolio(userId, initialAmount);
+    await executeVirtualTrades(userId, analysisResults);
+
+    return { success: true, message: `AI Agent executed trades based on ${analysisResults.length} signals.` };
+  } catch (error) {
+    console.error("Manual AI Trading Error:", error);
+    return { success: false, message: "Failed to trigger AI trading." };
+  }
+}
+
+
+export async function resetAIChallenge(userId: string, initialAmount: number = 600) {
+  try {
+    const success = await resetVirtualPortfolio(userId, initialAmount);
+    if (success) {
+      return { success: true, message: "AI Challenge reset successfully." };
+    }
+    return { success: false, message: "Failed to reset challenge." };
+  } catch (e) {
+    return { success: false, message: "Error resetting challenge." };
+  }
 }

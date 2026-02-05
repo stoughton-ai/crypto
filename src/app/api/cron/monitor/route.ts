@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { adminDb, adminMessaging } from '@/lib/firebase-admin';
 import { analyzeCrypto } from '@/app/actions';
 import { AGENT_WATCHLIST } from '@/lib/constants';
+import { initVirtualPortfolio, executeVirtualTrades } from '@/services/virtualPortfolioAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 
 export const dynamic = 'force-dynamic';
@@ -66,6 +67,8 @@ export async function GET() {
 
             let successCount = 0;
 
+            let analysisResults: any[] = [];
+
             // Generate Reports for WL
             await Promise.all(AGENT_WATCHLIST.map(async (ticker) => {
                 try {
@@ -76,6 +79,8 @@ export async function GET() {
                         console.warn(`Skipping unverified report for ${ticker} - Data source was research/fallback.`);
                         return;
                     }
+
+                    analysisResults.push(analysis);
 
                     // Save to Library (Firestore Admin)
                     await adminDb!.collection('intel_reports').add({
@@ -90,6 +95,16 @@ export async function GET() {
                     console.error(`Failed to analyze ${ticker} for ${user.uid}`, err);
                 }
             }));
+
+            // 2b. Virtual Portfolio Manager
+            if (successCount > 0) {
+                try {
+                    await initVirtualPortfolio(user.uid);
+                    await executeVirtualTrades(user.uid, analysisResults);
+                } catch (err) {
+                    console.error("Virtual Portfolio Error", err);
+                }
+            }
 
             // Send Notification
             if (successCount > 0 && user.data.fcmToken) {
