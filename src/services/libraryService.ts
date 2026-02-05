@@ -59,10 +59,11 @@ export const fetchLibrary = async (userId: string) => {
 
         return reports;
     } catch (error) {
-        console.error("Error fetching library:", error);
-        // Fallback or check for index errors
-        if (error instanceof Error && error.message.includes("index")) {
-            console.warn("Firestore index required. Falling back to client-side filter.");
+        console.error("Error fetching library (Primary):", error);
+
+        // Fallback: If Sorted Query fails (likely missing index), try basic query + client-side sort
+        try {
+            console.warn("Falling back to client-side filter/sort.");
             const qBasic = query(collection(db, LIBRARY_COLLECTION), where("userId", "==", userId));
             const snapshot = await getDocs(qBasic);
             return snapshot.docs.map(doc => ({
@@ -71,8 +72,10 @@ export const fetchLibrary = async (userId: string) => {
             } as LibraryReport)).sort((a: any, b: any) =>
                 new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()
             );
+        } catch (fallbackError) {
+            console.error("Error fetching library (Fallback):", fallbackError);
+            throw fallbackError;
         }
-        throw error;
     }
 };
 

@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, getVerifiedPrices } from "./actions";
+import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, getVerifiedPrices, getAgentConsultation } from "./actions"; // Added getAgentConsultation
+import { AGENT_WATCHLIST } from "@/lib/constants";
 import { type CryptoAnalysisResult } from "@/lib/gemini";
 import { useAuth } from "@/context/AuthContext";
+import { type AgentConsultationResult } from "@/lib/agent";
 import { fetchLibrary, saveToLibrary, deleteReport, migrateLegacyLibrary, clearLibrary, type LibraryReport } from "@/services/libraryService";
 import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, clearPortfolio, recordTrade, fetchRealizedTrades, type PortfolioItem, type PortfolioSnapshot, type RealizedTrade } from "@/services/portfolioService";
 import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
-import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign } from "lucide-react";
+import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign, Sparkles } from "lucide-react";
 import NotificationSettings from "@/components/NotificationSettings";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -55,7 +57,7 @@ export default function Home() {
   // Portfolio State
   const [isPortfolioOpen, setIsPortfolioOpen] = useState(false);
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
-  const [portfolioPrices, setPortfolioPrices] = useState<Record<string, number>>({});
+  const [portfolioPrices, setPortfolioPrices] = useState<Record<string, { price: number; source: string; timestamp: number }>>({});
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
   const [realizedTrades, setRealizedTrades] = useState<RealizedTrade[]>([]);
   const [isAddingAsset, setIsAddingAsset] = useState(false);
@@ -66,6 +68,12 @@ export default function Home() {
   const [lastLoggedValue, setLastLoggedValue] = useState<number | null>(null);
   const [isRevaluing, setIsRevaluing] = useState(false);
   const [portfolioTab, setPortfolioTab] = useState<'holdings' | 'history'>('holdings');
+
+  // Agent State
+  const [isAgentOpen, setIsAgentOpen] = useState(false);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentStatus, setAgentStatus] = useState("");
+  const [agentResult, setAgentResult] = useState<AgentConsultationResult | null>(null);
 
   // Auto-Retry State
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
@@ -89,7 +97,11 @@ export default function Home() {
 
   useEffect(() => {
     if (isPortfolioOpen && user && portfolioItems.length > 0) {
-      const totalValue = portfolioItems.reduce((acc, item) => acc + (item.amount * (portfolioPrices[item.ticker] || item.averagePrice)), 0);
+      const totalValue = portfolioItems.reduce((acc, item) => {
+        const priceData = portfolioPrices[item.ticker];
+        const price = priceData ? priceData.price : item.averagePrice;
+        return acc + (item.amount * price);
+      }, 0);
       // Log snapshot on access if value changed or it's been a while
       if (totalValue > 0 && totalValue !== lastLoggedValue) {
         recordPortfolioSnapshot(user.uid, totalValue).then(() => {
@@ -126,27 +138,39 @@ export default function Home() {
   const loadLibrary = async () => {
     if (!user) return;
 
-    // 1. Check for legacy reports to migrate
-    const legacy = await getLegacyReports();
-    if (legacy.length > 0) {
-      await migrateLegacyLibrary(user.uid, legacy);
-      await deleteLegacyFile(); // Wipe local file once migrated to cloud
+    try {
+      // Migration Check
+      const legacy = await getLegacyReports();
+      if (legacy.length > 0) {
+        await migrateLegacyLibrary(user.uid, legacy);
+        await deleteLegacyFile(); // Wipe local file once migrated to cloud
+      }
+
+      const data = await fetchLibrary(user.uid);
+      console.log(`Loaded ${data.length} reports for user ${user.uid}`);
+
+      // Deduplicate in case of race condition during migration
+      const uniqueReports = data.reduce((acc: any[], current: any) => {
+        const x = acc.find(item => item.ticker === current.ticker && item.savedAt === current.savedAt);
+        if (!x) return acc.concat([current]);
+        return acc;
+      }, []);
+
+      setLibraryReports(uniqueReports);
+    } catch (error) {
+      console.error("Failed to load library:", error);
+      setModalConfig({
+        isOpen: true,
+        title: "Library Load Error",
+        message: "Failed to load your saved reports. Please try again later.",
+        type: "alert"
+      });
     }
-
-    const data = await fetchLibrary(user.uid);
-
-    // Deduplicate in case of race condition during migration
-    const uniqueReports = data.reduce((acc: any[], current: any) => {
-      const x = acc.find(item => item.ticker === current.ticker && item.savedAt === current.savedAt);
-      if (!x) return acc.concat([current]);
-      return acc;
-    }, []);
-
-    setLibraryReports(uniqueReports);
   };
 
   const itemValue = (item: PortfolioItem) => {
-    const currentPrice = portfolioPrices[item.ticker] || item.averagePrice;
+    const priceData = portfolioPrices[item.ticker];
+    const currentPrice = priceData ? priceData.price : item.averagePrice;
     return `$${(item.amount * currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
@@ -171,8 +195,13 @@ export default function Home() {
   const updatePortfolioPrices = async () => {
     const tickers = portfolioItems.map(item => item.ticker);
     if (tickers.length === 0) return;
-    const prices = await getVerifiedPrices(tickers);
-    setPortfolioPrices(prices);
+
+    try {
+      const prices = await getVerifiedPrices(tickers);
+      setPortfolioPrices(prev => ({ ...prev, ...prices })); // Merges detailed objects
+    } catch (e) {
+      console.error("Failed to update prices", e);
+    }
   };
 
   const handleSaveAsset = async (e: React.FormEvent) => {
@@ -228,10 +257,10 @@ export default function Home() {
 
   const startSelling = (item: PortfolioItem) => {
     setSellingAsset(item);
-    const currentPrice = portfolioPrices[item.ticker];
+    const currentPriceData = portfolioPrices[item.ticker];
     setSellData({
       amount: item.amount.toString(),
-      price: currentPrice ? currentPrice.toString() : "",
+      price: currentPriceData ? currentPriceData.price.toString() : "",
       date: new Date().toISOString().split('T')[0]
     });
     setIsAddingAsset(false);
@@ -344,7 +373,7 @@ export default function Home() {
       setModalConfig({
         isOpen: true,
         title: "Analysis Failed",
-        message: "Failed to fetch analysis. Ensure your API key is configured.",
+        message: err instanceof Error ? err.message : "An unexpected network error occurred.",
         type: "alert"
       });
       setRetryCountdown(null);
@@ -394,7 +423,11 @@ export default function Home() {
       setPortfolioPrices(prev => ({ ...prev, ...verifiedPrices }));
 
       // Update snapshot immediately with confirmed values
-      const totalValue = portfolioItems.reduce((acc, item) => acc + (item.amount * (verifiedPrices[item.ticker] || item.averagePrice)), 0);
+      const totalValue = portfolioItems.reduce((acc, item) => {
+        const priceData = verifiedPrices[item.ticker];
+        const price = priceData ? priceData.price : item.averagePrice;
+        return acc + (item.amount * price);
+      }, 0);
       await recordPortfolioSnapshot(user.uid, totalValue);
       await loadPortfolioHistory();
     } catch (e) {
@@ -407,6 +440,62 @@ export default function Home() {
       });
     } finally {
       setIsRevaluing(false);
+    }
+  };
+
+  const handleConsultAgent = async () => {
+    if (!user || portfolioItems.length === 0) return;
+
+    setIsAgentOpen(true);
+    setAgentLoading(true);
+    setAgentResult(null);
+    setAgentStatus("Initializing Market Scanner...");
+
+    try {
+      // CLIENT-SIDE RETRY LOOP for Visual Guidance
+      const maxRetries = 5;
+      let prices: Record<string, { price: number; source: string; timestamp: number }> = {};
+
+      // 1. Fetch Prices with Retry
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        setAgentStatus(attempt === 1
+          ? "Acquiring Verified Data Sources..."
+          : `Retrying Connection to Exchanges (${attempt}/${maxRetries})...`
+        );
+
+        // Find which are missing
+        const currentKeys = Object.keys(prices);
+        const missing = AGENT_WATCHLIST.filter(t => !currentKeys.includes(t));
+
+        if (missing.length === 0) break; // All good
+
+        // Fetch missing
+        const newPrices = await getVerifiedPrices(missing);
+        prices = { ...prices, ...newPrices };
+
+        // Check again
+        const stillMissing = AGENT_WATCHLIST.filter(t => !Object.keys(prices).includes(t));
+
+        if (stillMissing.length > 0 && attempt < maxRetries) {
+          // Wait 2s before retry
+          await new Promise(r => setTimeout(r, 2000));
+        } else if (stillMissing.length === 0) {
+          break;
+        }
+      }
+
+      setAgentStatus("Analyzing Portfolio Structure...");
+
+      // 2. Consult Agent with acquired prices
+      const result = await getAgentConsultation(portfolioItems, prices);
+      setAgentResult(result);
+
+    } catch (e) {
+      console.error(e);
+      setModalConfig({ isOpen: true, title: "Consultation Failed", message: "The agent could not complete the analysis.", type: "alert" });
+      setIsAgentOpen(false);
+    } finally {
+      setAgentLoading(false);
     }
   };
 
@@ -518,7 +607,7 @@ export default function Home() {
                 </div>
 
                 <h3 className="text-xl font-black text-white mb-2">{modalConfig.title}</h3>
-                <p className="text-slate-400 text-sm leading-relaxed mb-8">{modalConfig.message}</p>
+                <p className="text-slate-400 text-sm leading-relaxed mb-8 text-justify">{modalConfig.message}</p>
 
                 <div className="flex gap-3">
                   {modalConfig.type !== 'alert' && (
@@ -605,12 +694,20 @@ export default function Home() {
                   <Briefcase className="text-emerald-400" size={24} />
                   My Portfolio
                 </h2>
-                <button
-                  onClick={() => setIsPortfolioOpen(false)}
-                  className="p-2 hover:bg-white/5 rounded-full text-slate-400 transition-colors"
-                >
-                  <X size={20} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleConsultAgent}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all shadow-lg shadow-violet-500/20"
+                  >
+                    <Sparkles size={14} /> AI Agent
+                  </button>
+                  <button
+                    onClick={() => setIsPortfolioOpen(false)}
+                    className="p-2 hover:bg-white/5 rounded-full text-slate-400 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               {/* Portfolio Actions: Clear All */}
@@ -660,15 +757,15 @@ export default function Home() {
                     </button>
                     <p className="text-xs font-bold uppercase tracking-widest text-emerald-500/60 mb-1">Total Balance</p>
                     <div className="text-3xl font-black text-white font-mono">
-                      ${portfolioItems.reduce((acc, item) => acc + (item.amount * (portfolioPrices[item.ticker] || item.averagePrice)), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${portfolioItems.reduce((acc, item) => acc + (item.amount * (portfolioPrices[item.ticker]?.price || item.averagePrice)), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div className="flex items-center gap-2 mt-2">
                       <div className={cn(
                         "flex items-center gap-1 text-sm font-bold",
-                        portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0) >= 0 ? "text-emerald-400" : "text-red-400"
+                        portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker]?.price || item.averagePrice) - item.averagePrice)), 0) >= 0 ? "text-emerald-400" : "text-red-400"
                       )}>
-                        {portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0) >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
-                        ${Math.abs(portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker] || item.averagePrice) - item.averagePrice)), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker]?.price || item.averagePrice) - item.averagePrice)), 0) >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
+                        ${Math.abs(portfolioItems.reduce((acc, item) => acc + (item.amount * ((portfolioPrices[item.ticker]?.price || item.averagePrice) - item.averagePrice)), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                       <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">All Time PNL</span>
                     </div>
@@ -753,9 +850,9 @@ export default function Home() {
                       ) : (
                         portfolioItems.map((item) => {
                           const currentPrice = portfolioPrices[item.ticker];
-                          const value = item.amount * (currentPrice || item.averagePrice);
-                          const pnl = currentPrice ? (currentPrice - item.averagePrice) * item.amount : 0;
-                          const pnlPct = currentPrice ? ((currentPrice - item.averagePrice) / item.averagePrice) * 100 : 0;
+                          const value = item.amount * (currentPrice?.price || item.averagePrice);
+                          const pnl = currentPrice ? (currentPrice.price - item.averagePrice) * item.amount : 0;
+                          const pnlPct = currentPrice ? ((currentPrice.price - item.averagePrice) / item.averagePrice) * 100 : 0;
 
                           return (
                             <div key={item.id} className="glass rounded-2xl border-white/5 hover:border-emerald-500/30 transition-all group overflow-hidden">
@@ -789,7 +886,7 @@ export default function Home() {
                                   <div className="text-center border-l border-white/5">
                                     <div className="text-[8px] font-bold uppercase tracking-widest text-slate-500 mb-1">Live Price</div>
                                     <div className="text-xs font-mono font-bold text-emerald-400">
-                                      ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "..."}
+                                      ${currentPrice ? currentPrice.price.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "..."}
                                     </div>
                                   </div>
                                   <div className="text-center border-l border-white/5">
@@ -799,6 +896,17 @@ export default function Home() {
                                     </div>
                                   </div>
                                 </div>
+                                {portfolioPrices[item.ticker] && (
+                                  <div className="mt-1 flex flex-col items-end opacity-70">
+                                    <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-emerald-400">
+                                      <ShieldCheck size={10} />
+                                      <span>Verified by {portfolioPrices[item.ticker].source}</span>
+                                    </div>
+                                    <span className="text-[9px] text-slate-500">
+                                      {new Date(portfolioPrices[item.ticker].timestamp).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Action Footer */}
@@ -939,6 +1047,78 @@ export default function Home() {
                         className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 transition-all"
                       >
                         {editingAsset ? "Update Record" : "Add to Secure Ledger"}
+                      </button>
+                    </form>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Sell Asset Modal/Form */}
+              <AnimatePresence>
+                {sellingAsset && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 20 }}
+                    className="mt-6 p-6 glass rounded-[2rem] border-red-500/30 shadow-2xl"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-bold text-white flex items-center gap-2 uppercase tracking-widest text-xs">
+                        <Minus className="text-red-400" size={14} />
+                        Sell {sellingAsset.ticker}
+                      </h4>
+                      <button onClick={() => { setSellingAsset(null); setSellData({ amount: "", price: "", date: "" }); }} className="text-slate-500 hover:text-white transition-colors">
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <form onSubmit={handleSellAsset} className="space-y-4">
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-1">
+                          <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Units to Sell</label>
+                          <div className="px-3 py-2 text-xs text-white bg-white/5 rounded-xl border border-white/10 font-mono">
+                            Max: {sellingAsset.amount}
+                          </div>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Amount</label>
+                          <input
+                            type="number"
+                            step="any"
+                            placeholder="0.00"
+                            value={sellData.amount}
+                            onChange={(e) => setSellData({ ...sellData, amount: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-red-500 outline-none"
+                            required
+                            max={sellingAsset.amount}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Sell Price (USD)</label>
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="Price each..."
+                          value={sellData.price}
+                          onChange={(e) => setSellData({ ...sellData, price: e.target.value })}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-red-500 outline-none"
+                          required
+                        />
+                        <div className="col-span-2 mt-3">
+                          <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Sale Date</label>
+                          <input
+                            type="date"
+                            value={sellData.date}
+                            onChange={(e) => setSellData({ ...sellData, date: e.target.value })}
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-red-500 outline-none"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-widest shadow-lg shadow-red-500/20 transition-all"
+                      >
+                        Confirm Sale
                       </button>
                     </form>
                   </motion.div>
@@ -1378,7 +1558,7 @@ export default function Home() {
 
               <div className="w-full max-w-2xl text-center px-2">
                 <h3 className="text-xl md:text-2xl font-bold mb-3 md:mb-4 underline underline-offset-8 decoration-blue-500/30">Analysis Summary</h3>
-                <p className="text-slate-400 text-sm md:text-lg leading-relaxed italic">
+                <p className="text-slate-400 text-sm md:text-lg leading-relaxed italic text-justify">
                   {result.summary}
                 </p>
                 <div className="mt-6 md:mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6 max-w-md mx-auto">
@@ -1399,8 +1579,8 @@ export default function Home() {
                   <h4 className="text-sm font-bold uppercase tracking-widest text-violet-400 mb-3 flex items-center justify-center gap-2">
                     <Activity size={16} /> Historical Trend Analysis
                   </h4>
-                  <p className="text-slate-300 italic text-sm md:text-base leading-relaxed bg-violet-500/5 border border-violet-500/10 p-4 rounded-xl">
-                    "{result.historicalInsight}"
+                  <p className="text-slate-300 italic text-sm md:text-base leading-relaxed bg-violet-500/5 border border-violet-500/10 p-4 rounded-xl text-justify">
+                    &quot;{result.historicalInsight}&quot;
                   </p>
                 </div>
               )}
@@ -1465,6 +1645,121 @@ export default function Home() {
           </div>
         </div>
       )}
+      {/* AI Agent Modal */}
+      <AnimatePresence>
+        {isAgentOpen && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsAgentOpen(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-2xl bg-slate-900 border border-white/10 rounded-[2.5rem] p-8 md:p-12 shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
+            >
+              <button
+                onClick={() => setIsAgentOpen(false)}
+                className="absolute top-6 right-6 p-2 rounded-full hover:bg-white/5 transition-colors text-slate-400 hover:text-white"
+              >
+                <X size={24} />
+              </button>
+
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-violet-500 via-fuchsia-500 to-blue-500" />
+
+              <div className="flex items-center gap-4 mb-8">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+                  <Sparkles className="text-white" size={32} />
+                </div>
+                <div>
+                  <h2 className="text-2xl md:text-3xl font-black text-white">Portfolio Agent</h2>
+                  <p className="text-slate-400 text-sm">AI-Powered Strategic Consultant</p>
+                </div>
+              </div>
+
+              {agentLoading ? (
+                <div className="py-20 text-center">
+                  <Loader2 className="animate-spin text-fuchsia-500 mx-auto mb-6" size={48} />
+                  <h3 className="text-xl font-bold text-white mb-2">{agentStatus}</h3>
+                  <p className="text-slate-400 text-sm max-w-sm mx-auto">
+                    Scanning the watchlist (BTC, ETH, XRP, DOGE, SOL, GODS) for optimal switch signals...
+                  </p>
+                </div>
+              ) : agentResult ? (
+                <div className="space-y-8">
+                  {/* Verified Data Source Display */}
+                  {agentResult.verifiedPrices && Object.keys(agentResult.verifiedPrices).length > 0 && (
+                    <div className="bg-emerald-500/5 rounded-2xl p-4 border border-emerald-500/20">
+                      <div className="flex items-center gap-2 mb-3">
+                        <ShieldCheck className="text-emerald-400" size={16} />
+                        <h4 className="text-xs font-bold uppercase tracking-widest text-emerald-500">Verified Live Data Source</h4>
+                      </div>
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                        {Object.entries(agentResult.verifiedPrices).map(([ticker, price]) => (
+                          <div key={ticker} className="bg-slate-900/50 rounded-lg p-2 text-center border border-emerald-500/10">
+                            <div className="text-[10px] font-bold text-slate-500">{ticker}</div>
+                            <div className="text-xs font-mono font-bold text-emerald-400">${price.price?.toLocaleString() || price.toLocaleString()}</div>
+                            {price.source && <div className="text-[8px] text-slate-600 mt-1">{price.source}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-white/5 rounded-2xl p-6 border border-white/5">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Market Overview</h4>
+                    <p className="text-slate-300 leading-relaxed italic text-justify">&quot;{agentResult.summary}&quot;</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Strategic Moves</h4>
+                    {agentResult.suggestions.length === 0 ? (
+                      <div className="text-center py-8 border border-dashed border-white/10 rounded-2xl">
+                        <ShieldCheck className="mx-auto text-emerald-500 mb-3" size={32} />
+                        <p className="text-white font-bold">No Actions Recommended</p>
+                        <p className="text-sm text-slate-500 mt-1">Your portfolio is currently positioned optimally.</p>
+                      </div>
+                    ) : (
+                      <div className="grid gap-4">
+                        {agentResult.suggestions.map((move, i) => (
+                          <div key={i} className="glass p-6 rounded-2xl border-white/10 flex flex-col md:flex-row gap-6 items-start md:items-center">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <span className={cn(
+                                  "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest",
+                                  move.action === "SWITCH" ? "bg-blue-500/20 text-blue-400" : "bg-emerald-500/20 text-emerald-400"
+                                )}>{move.action}</span>
+                                <span className="text-xs font-bold text-slate-400">Confidence: {move.confidenceScore}%</span>
+                              </div>
+                              <h4 className="text-lg font-bold text-white mb-2">
+                                {move.action === "SWITCH"
+                                  ? <span>Sell <span className="text-red-400">{move.percentage}% of {move.sellTicker}</span> to Buy <span className="text-emerald-400">{move.buyTicker}</span></span>
+                                  : <span>{move.action} {move.buyTicker || move.sellTicker}</span>
+                                }
+                              </h4>
+                              <p className="text-sm text-slate-400 text-justify">{move.reason}</p>
+                            </div>
+                            <div className="shrink-0 w-full md:w-auto">
+                              <button className="w-full md:w-auto px-6 py-3 bg-white text-slate-900 font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-slate-200 transition-colors">
+                                Prepare Trade
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }

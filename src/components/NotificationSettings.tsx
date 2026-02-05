@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { messaging, db } from "@/lib/firebase";
 import { getToken } from "firebase/messaging";
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
-import { Bell, BellOff, Clock, Save, Loader2, Check } from "lucide-react";
+import { Bell, BellOff, Clock, Save, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx } from "clsx";
@@ -12,8 +12,8 @@ import { clsx } from "clsx";
 export default function NotificationSettings() {
     const { user } = useAuth();
     const [enabled, setEnabled] = useState(false);
-    const [morningTime, setMorningTime] = useState("07:30");
-    const [eveningTime, setEveningTime] = useState("19:30");
+    const [morningTime, setMorningTime] = useState("06:00");
+    const [eveningTime, setEveningTime] = useState("18:00");
     const [loading, setLoading] = useState(false);
     const [statusMsg, setStatusMsg] = useState("");
     const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>("default");
@@ -56,16 +56,12 @@ export default function NotificationSettings() {
             setPermissionStatus(permission);
 
             if (permission === "granted") {
-                // Get Timezone
                 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-                // Get Token
-                // Note: In production you often need a VAPID key. If this fails, we will log it.
                 const token = await getToken(messaging, {
                     vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY
                 }).catch(async (err) => {
-                    console.log("Standard token fetch failed, trying without key if that helps or just logging error", err);
-                    // Note: Without a specific VAPID key committed in env, we often rely on the project's default configuration linking.
+                    console.log("Standard token fetch failed, trying fallback", err);
                     return await getToken(messaging!).catch(e => null);
                 });
 
@@ -99,7 +95,6 @@ export default function NotificationSettings() {
         if (!enabled) {
             await requestPermission();
         } else {
-            // Disable
             setLoading(true);
             if (user) {
                 await updateDoc(doc(db, "users", user.uid, "settings", "notifications"), {
@@ -154,7 +149,7 @@ export default function NotificationSettings() {
                             <p className={clsx("text-sm font-bold", enabled ? "text-white" : "text-slate-400")}>
                                 {enabled ? "Monitoring Active" : "Monitoring Off"}
                             </p>
-                            <p className="text-[10px] text-slate-500">Twice-daily reports</p>
+                            <p className="text-[10px] text-slate-500">4x Daily Market Intelligence</p>
                         </div>
                     </div>
                     <button
@@ -184,8 +179,9 @@ export default function NotificationSettings() {
                         >
                             <div className="space-y-3 pt-2">
                                 <div className="grid grid-cols-2 gap-3">
+                                    {/* Morning */}
                                     <div>
-                                        <label className="text-[10px] font-bold text-slate-500 mb-1 block">Morning Check</label>
+                                        <label className="text-[10px] font-bold text-slate-500 mb-1 block">Morning Brief</label>
                                         <div className="relative">
                                             <Clock size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                                             <input
@@ -196,8 +192,24 @@ export default function NotificationSettings() {
                                             />
                                         </div>
                                     </div>
+
+                                    {/* Lunch */}
+                                    <div className="opacity-60">
+                                        <label className="text-[10px] font-bold text-slate-500 mb-1 block">Midday Update</label>
+                                        <div className="relative">
+                                            <Clock size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                                            <input
+                                                type="time"
+                                                disabled
+                                                value="12:00"
+                                                className="w-full bg-black/20 border border-white/5 rounded-lg py-2 pl-8 pr-2 text-xs font-mono text-slate-400 cursor-not-allowed"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Evening */}
                                     <div>
-                                        <label className="text-[10px] font-bold text-slate-500 mb-1 block">Evening Check</label>
+                                        <label className="text-[10px] font-bold text-slate-500 mb-1 block">Evening Recap</label>
                                         <div className="relative">
                                             <Clock size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                                             <input
@@ -205,6 +217,20 @@ export default function NotificationSettings() {
                                                 value={eveningTime}
                                                 onChange={(e) => setEveningTime(e.target.value)}
                                                 className="w-full bg-black/40 border border-white/10 rounded-lg py-2 pl-8 pr-2 text-xs font-mono text-white focus:outline-none focus:border-blue-500 transition-colors"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Night */}
+                                    <div className="opacity-60">
+                                        <label className="text-[10px] font-bold text-slate-500 mb-1 block">Midnight Intel</label>
+                                        <div className="relative">
+                                            <Clock size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                                            <input
+                                                type="time"
+                                                disabled
+                                                value="00:00"
+                                                className="w-full bg-black/20 border border-white/5 rounded-lg py-2 pl-8 pr-2 text-xs font-mono text-slate-400 cursor-not-allowed"
                                             />
                                         </div>
                                     </div>

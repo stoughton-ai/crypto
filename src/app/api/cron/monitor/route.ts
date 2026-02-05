@@ -1,158 +1,138 @@
 import { NextResponse } from 'next/server';
-import { adminDb, adminMessaging, firebaseAdmin } from '@/lib/firebase-admin';
-import { getVerifiedPrices } from '@/app/actions';
+import { adminDb, adminMessaging } from '@/lib/firebase-admin';
+import { analyzeCrypto } from '@/app/actions';
+import { AGENT_WATCHLIST } from '@/lib/constants';
+import { FieldValue } from 'firebase-admin/firestore';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // Extend timeout for multiple AI calls
 
 export async function GET() {
     if (!adminDb || !adminMessaging) {
-        console.error("Monitoring Cron: Firebase Admin SDK not initialized. Missing FIREBASE_SERVICE_ACCOUNT_JSON.");
-        return NextResponse.json({
-            error: "Admin SDK missing",
-            detail: "Please configure FIREBASE_SERVICE_ACCOUNT_JSON in .env.local to enable alerts."
-        }, { status: 500 });
+        console.error("Monitoring Cron: Firebase Admin SDK not initialized.");
+        return NextResponse.json({ error: "Admin SDK missing" }, { status: 500 });
     }
 
     try {
         const now = new Date();
+        const dateStr = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 
-        // 1. Get all active notification settings
-        // Note: 'collectionGroup' queries all collections named 'settings'.
-        // We expect the document id to be 'notifications' to confirm it's the right config.
-        const snapshot = await adminDb.collectionGroup('settings')
-            .where('enabled', '==', true)
-            .get();
-
-        // Filter strictly for the notifications document to avoid picking up other settings
+        // 1. Get Notification Settings
+        const snapshot = await adminDb.collectionGroup('settings').where('enabled', '==', true).get();
         const validDocs = snapshot.docs.filter(d => d.id === 'notifications');
 
-        if (validDocs.length === 0) {
-            return NextResponse.json({ message: "No active monitors found." });
-        }
+        if (validDocs.length === 0) return NextResponse.json({ message: "No active monitors found." });
 
-        // 2. Identify who needs an alert
-        const eligibleUsers: Array<{
-            uid: string,
-            ref: FirebaseFirestore.DocumentReference,
-            data: any,
-            type: 'morning' | 'evening'
-        }> = [];
+        const eligibleUsers: Array<{ uid: string, ref: FirebaseFirestore.DocumentReference, data: any, type: 'morning' | 'lunch' | 'evening' | 'night' }> = [];
 
         for (const doc of validDocs) {
             const data = doc.data();
             const timeZone = data.timeZone || 'UTC';
 
-            // Get user's local date and time components
-            const dateStr = new Intl.DateTimeFormat('en-CA', {
-                timeZone, year: 'numeric', month: '2-digit', day: '2-digit'
-            }).format(now); // YYYY-MM-DD
-
-            const timeParts = new Intl.DateTimeFormat('en-GB', {
-                timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-            }).format(now).split(':').map(Number);
-
+            // Time Check Logic
+            const timeParts = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now).split(':').map(Number);
             const currentMinutes = timeParts[0] * 60 + timeParts[1];
+            const userDateStr = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 
-            // Parse Settings
-            const [mH, mM] = (data.morningTime || "07:30").split(':').map(Number);
-            const morningMinutes = mH * 60 + mM;
+            // Defaults: Night 00:00, Morning 06:00, Lunch 12:00, Evening 18:00
+            const checks = [
+                { type: 'night', time: "00:00", field: 'lastNightCheck' },
+                { type: 'morning', time: data.morningTime || "06:00", field: 'lastMorningCheck' }, // Default changed to 6am
+                { type: 'lunch', time: "12:00", field: 'lastLunchCheck' },
+                { type: 'evening', time: data.eveningTime || "18:00", field: 'lastEveningCheck' }  // Default changed to 6pm
+            ];
 
-            const [eH, eM] = (data.eveningTime || "19:30").split(':').map(Number);
-            const eveningMinutes = eH * 60 + eM;
+            for (const check of checks) {
+                const [h, m] = check.time.split(':').map(Number);
+                const checkMinutes = h * 60 + m;
 
-            // Check Morning
-            // Trigger if: Current time is past target AND we haven't sent it today
-            if (currentMinutes >= morningMinutes && data.lastMorningCheck !== dateStr) {
-                // Avoid triggering if it's too late (e.g. > 2 hours past)? Optional. 
-                // For now, simpler is better: ensure we send once per day after the time.
-                eligibleUsers.push({ uid: doc.ref.parent.parent!.id, ref: doc.ref, data, type: 'morning' });
+                // Trigger if past time AND not sent today
+                // Note: Night check (00:00) runs immediately at start of day
+                if (currentMinutes >= checkMinutes && data[check.field] !== userDateStr) {
+                    eligibleUsers.push({ uid: doc.ref.parent.parent!.id, ref: doc.ref, data, type: check.type as any });
+                    break; // Only trigger one alert per cycle to avoid spam if cron is infrequent (though normally cron is frequent enough)
+                    // Actually, if we missed multiple, we might want to send the latest? 
+                    // Or just break to send the first pending one?
+                    // Let's break to be safe, process one at a time.
+                }
             }
-            // Check Evening
-            else if (currentMinutes >= eveningMinutes && data.lastEveningCheck !== dateStr) {
-                eligibleUsers.push({ uid: doc.ref.parent.parent!.id, ref: doc.ref, data, type: 'evening' });
-            }
         }
 
-        if (eligibleUsers.length === 0) {
-            return NextResponse.json({ message: "No alerts due at this time." });
-        }
+        if (eligibleUsers.length === 0) return NextResponse.json({ message: "No alerts due." });
 
-        // 3. Fetch Portfolios for Eligible Users
-        const portfolios = await Promise.all(eligibleUsers.map(async (u) => {
-            const pRef = adminDb!.collection('users').doc(u.uid).collection('portfolio');
-            const pSnap = await pRef.get();
-            const items = pSnap.docs.map(d => d.data());
-            return { ...u, items };
-        }));
+        // 2. Process Eligible Users
+        const results = await Promise.all(eligibleUsers.map(async (user) => {
+            console.log(`Generating reports for user ${user.uid} (${user.type})...`);
 
-        // Start Price Fetch
-        const allTickers = new Set<string>();
-        portfolios.forEach(p => p.items.forEach((i: any) => allTickers.add(i.ticker)));
+            let successCount = 0;
 
-        if (allTickers.size === 0) {
-            return NextResponse.json({ message: "Users need alerts but have no assets." });
-        }
+            // Generate Reports for WL
+            await Promise.all(AGENT_WATCHLIST.map(async (ticker) => {
+                try {
+                    const analysis = await analyzeCrypto(ticker);
 
-        // 4. Get Verified Prices
-        // We use the shared action logic but calling it here.
-        const prices = await getVerifiedPrices(Array.from(allTickers));
+                    // QUALITY CHECK: Only save reports with confirmed live data
+                    if (analysis.verificationStatus.toLowerCase().includes("research")) {
+                        console.warn(`Skipping unverified report for ${ticker} - Data source was research/fallback.`);
+                        return;
+                    }
 
-        // 5. Send Notifications
-        const results = await Promise.all(portfolios.map(async (user) => {
-            if (user.items.length === 0) return { uid: user.uid, status: 'skipped-empty' };
+                    // Save to Library (Firestore Admin)
+                    await adminDb!.collection('intel_reports').add({
+                        ...analysis,
+                        userId: user.uid,
+                        savedAt: new Date().toISOString(),
+                        createdAt: FieldValue.serverTimestamp(),
+                        generatedBy: "AutoMonitor"
+                    });
+                    successCount++;
+                } catch (err) {
+                    console.error(`Failed to analyze ${ticker} for ${user.uid}`, err);
+                }
+            }));
 
-            const totalValue = user.items.reduce((acc: number, item: any) => acc + (item.amount * (prices[item.ticker.toUpperCase()] || item.averagePrice)), 0);
-            const costBasis = user.items.reduce((acc: number, item: any) => acc + (item.amount * item.averagePrice), 0);
-            const pnl = totalValue - costBasis;
-            const pnlPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
-            const isProfit = pnl >= 0;
-            const emoji = isProfit ? "🟢" : "🔴";
+            // Send Notification
+            if (successCount > 0 && user.data.fcmToken) {
+                const titles = {
+                    night: '🌙 Midnight Intelligence',
+                    morning: '☀️ Morning Brief',
+                    lunch: '🍱 Midday Market Update',
+                    evening: '🌆 Evening Recap'
+                };
 
-            // Individual Traffic Lights (Top 3 by value)
-            const topAssets = user.items
-                .sort((a: any, b: any) => (b.amount * (prices[b.ticker.toUpperCase()] || 0)) - (a.amount * (prices[a.ticker.toUpperCase()] || 0)))
-                .slice(0, 3)
-                .map((item: any) => {
-                    const currentPrice = prices[item.ticker.toUpperCase()] || item.averagePrice;
-                    const iPnl = (currentPrice - item.averagePrice) / item.averagePrice;
-                    return `${item.ticker} ${iPnl >= 0 ? '🟢' : '🔴'}`;
-                }).join(', ');
-
-            const body = `Total: $${totalValue.toLocaleString()} (${isProfit ? '+' : ''}${pnlPct.toFixed(1)}%)\n` +
-                `Holdings: ${topAssets}${user.items.length > 3 ? '...' : ''}`;
-
-            try {
-                if (user.data.fcmToken) {
+                try {
                     await adminMessaging!.send({
                         token: user.data.fcmToken,
                         notification: {
-                            title: `${user.type === 'morning' ? '☀️ Morning' : '🌙 Evening'} Portfolio Snapshot`,
-                            body: body,
+                            title: titles[user.type],
+                            body: `Analysis Complete: ${successCount} new market reports have been generated and saved to your Library.`,
                         },
-                        webpush: {
-                            fcmOptions: {
-                                link: 'https://semaphore10.vercel.app/portfolio' // Replace with actual URL
-                            }
-                        }
+                        webpush: { fcmOptions: { link: 'https://semaphore10.vercel.app/portfolio' } }
                     });
+                } catch (e) {
+                    console.error("Push failed", e);
                 }
-
-                // Update Firestore to mark as sent
-                const field = user.type === 'morning' ? 'lastMorningCheck' : 'lastEveningCheck';
-                const timeZone = user.data.timeZone || 'UTC';
-                const sentDate = new Intl.DateTimeFormat('en-CA', {
-                    timeZone, year: 'numeric', month: '2-digit', day: '2-digit'
-                }).format(now);
-
-                await user.ref.update({ [field]: sentDate });
-                return { uid: user.uid, status: 'sent', type: user.type };
-            } catch (err) {
-                console.error(`Failed to send to ${user.uid}`, err);
-                return { uid: user.uid, status: 'failed' };
             }
+
+            // Update Status
+            // Determine field name dynamically
+            const fieldMap: Record<string, string> = {
+                night: 'lastNightCheck',
+                morning: 'lastMorningCheck',
+                lunch: 'lastLunchCheck',
+                evening: 'lastEveningCheck'
+            };
+            const field = fieldMap[user.type];
+
+            const timeZone = user.data.timeZone || 'UTC';
+            const userDateStr = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+
+            await user.ref.update({ [field]: userDateStr });
+
+            return { uid: user.uid, reportsGenerated: successCount };
         }));
 
-        return NextResponse.json({ success: true, processed: results.length, results });
+        return NextResponse.json({ success: true, results });
 
     } catch (error) {
         console.error("Cron Job Error", error);

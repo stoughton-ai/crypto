@@ -1,6 +1,9 @@
 "use server";
 
 import { model, type CryptoAnalysisResult } from "@/lib/gemini";
+import { consultCryptoAgent, type AgentConsultationResult } from "@/lib/agent";
+import { type PortfolioItem } from "@/services/portfolioService";
+import { AGENT_WATCHLIST } from "@/lib/constants";
 
 /**
  * Source 1: CoinGecko (Historical + Metadata + Price)
@@ -250,7 +253,8 @@ export async function analyzeCrypto(ticker: string, historyContextString?: strin
     return finalResult;
   } catch (error) {
     console.error("Analysis failed:", error);
-    throw new Error("Failed to analyze crypto. Please try again later.");
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    throw new Error(`AI Analysis Failed: ${errorMessage}`);
   }
 }
 
@@ -326,13 +330,17 @@ export async function getSimplePrices(tickers: string[]) {
  * Robustly fetch prices for portfolio revaluation using the multi-source verification engine.
  */
 export async function getVerifiedPrices(tickers: string[]) {
-  const results: Record<string, number> = {};
+  const results: Record<string, { price: number; source: string; timestamp: number }> = {};
 
   // limit concurrency to avoid rate limits if necessary, but 5-10 should be fine
   await Promise.all(tickers.map(async (ticker) => {
     const data = await getRealTimePrice(ticker);
     if (data) {
-      results[ticker.toUpperCase()] = data.price;
+      results[ticker.toUpperCase()] = {
+        price: data.price,
+        source: data.verificationStatus,
+        timestamp: Date.now()
+      };
     }
   }));
 
@@ -352,4 +360,43 @@ export async function deleteLegacyFile() {
   } catch {
     return false;
   }
+}
+
+/**
+ * Agent Consultation Action
+ */
+export async function getAgentConsultation(
+  portfolio: PortfolioItem[],
+  providedPrices?: Record<string, { price: number; source: string; timestamp: number }>
+): Promise<AgentConsultationResult> {
+
+  // 1. Get Live Prices (Use provided or fetch new)
+  let prices = providedPrices;
+  if (!prices) {
+    prices = await getVerifiedPrices(AGENT_WATCHLIST);
+  }
+
+  // 2. Prepare Context
+  const portfolioContext = portfolio.map(p => {
+    const marketData = prices![p.ticker];
+    const currentPrice = marketData ? marketData.price : 0;
+
+    return {
+      ticker: p.ticker,
+      amount: p.amount,
+      avgPrice: p.averagePrice,
+      currentValue: currentPrice * p.amount,
+      pnl: (currentPrice - p.averagePrice) * p.amount
+    };
+  });
+
+  // 3. Consult Agent
+  // Refactor prices to simple Key-Value for the prompt to keep token count low, or pass full?
+  // Let's pass full so we can return verifiedPrices with source.
+  // But for the PROMPT text, we might want to simplify.
+  // The agent.ts handles `marketPrices: any` and stringifies it.
+  // The `verifiedPrices` return value in `agent.ts` is just `marketPrices`.
+  // So if we pass the detailed object, `verifiedPrices` in the result will be detailed.
+  // This is perfect for the UI.
+  return await consultCryptoAgent(portfolioContext, prices);
 }
