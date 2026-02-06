@@ -3,9 +3,40 @@
 import { useState, useEffect } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
-import { Activity } from "lucide-react";
+import { Activity, RefreshCw } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { clsx } from "clsx";
+import { manualAgentCheck } from "@/app/actions";
+
+function ManualCheckButton({ userId }: { userId: string }) {
+    const [loading, setLoading] = useState(false);
+
+    const handleCheck = async () => {
+        if (loading) return;
+        setLoading(true);
+        try {
+            await manualAgentCheck(userId);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <button
+            onClick={handleCheck}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-2 py-1 rounded bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-[10px] font-bold text-white transition-colors"
+        >
+            <RefreshCw size={10} className={clsx(loading && "animate-spin")} />
+            {loading ? "Checking..." : "Highlight Change"}
+        </button>
+    );
+}
+
+import { getLatestScores } from "@/services/libraryService";
+import { AGENT_WATCHLIST } from "@/lib/constants";
 
 export default function MonitoringStatus() {
     const { user } = useAuth();
@@ -18,6 +49,7 @@ export default function MonitoringStatus() {
     const [morningTime, setMorningTime] = useState("06:00");
     const [eveningTime, setEveningTime] = useState("18:00");
     const [lastResearch, setLastResearch] = useState<string | null>(null);
+    const [scores, setScores] = useState<Record<string, { score: number, trafficLight: string }>>({});
 
     useEffect(() => {
         if (!user) return;
@@ -45,7 +77,10 @@ export default function MonitoringStatus() {
 
         const unsubVP = onSnapshot(doc(db, "virtual_portfolio", user.uid), (snap) => {
             if (snap.exists()) {
-                setLastResearch(snap.data().lastUpdated);
+                const val = snap.data().lastUpdated;
+                setLastResearch(val);
+                // Trigger score refresh when timestamp updates
+                getLatestScores(user.uid).then(setScores);
             }
         });
 
@@ -115,21 +150,43 @@ export default function MonitoringStatus() {
             </div>
 
             {lastResearch && (
-                <div className="p-2.5 bg-indigo-500/5 border border-indigo-500/20 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-lg bg-indigo-500/10 flex items-center justify-center">
-                            <Activity size={12} className="text-indigo-400" />
+                <div className="space-y-2">
+                    <div className="p-2.5 bg-indigo-500/5 border border-indigo-500/20 rounded-xl flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                                <Activity size={12} className="text-indigo-400" />
+                            </div>
+                            <div>
+                                <p className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest leading-none">Research Agent</p>
+                                <p className="text-[10px] text-slate-500 mt-1">Status: Cycle Success</p>
+                            </div>
                         </div>
-                        <div>
-                            <p className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest leading-none">Research Agent</p>
-                            <p className="text-[10px] text-slate-500 mt-1">Status: Cycle Success</p>
+                        <div className="flex flex-col items-end gap-1">
+                            <ManualCheckButton userId={user.uid} />
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter text-right">Last: {new Date(lastResearch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                         </div>
                     </div>
-                    <div className="text-right">
-                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter text-right">Last Analysis</p>
-                        <p className="text-[10px] font-mono text-indigo-300">
-                            {new Date(lastResearch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
+
+                    {/* Latest Scores Grid */}
+                    <div className="grid grid-cols-4 gap-1.5">
+                        {AGENT_WATCHLIST.map(ticker => {
+                            const data = scores[ticker.toUpperCase()];
+                            const score = data?.score || 0;
+                            const color = !data ? "bg-slate-800/50 border-white/5 text-slate-600" :
+                                score >= 66 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
+                                    score >= 50 ? "bg-amber-500/10 border-amber-500/20 text-amber-500" :
+                                        "bg-red-500/10 border-red-500/20 text-red-500";
+
+                            return (
+                                <div key={ticker} className={clsx(
+                                    "flex flex-col items-center p-1.5 rounded-lg border",
+                                    color
+                                )}>
+                                    <span className="text-[9px] font-bold">{ticker}</span>
+                                    <span className="text-[10px] font-mono">{data ? score : "-"}</span>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             )}

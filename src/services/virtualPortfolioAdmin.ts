@@ -126,8 +126,8 @@ export async function initVirtualPortfolio(userId: string, initialBalance: numbe
 /**
  * Executes trades based on AI analysis.
  * Rules:
- * - BUY: Score >= 75 (Green) AND Cash > 10. Buys $50 fixed or max cash.
- * - SELL: Score <= 45 (Red). Sells 100%.
+ * - BUY: Score >= 66 (Green) AND Cash > 10. Buys $50 fixed or max cash.
+ * - SELL: Score <= 49 (Red). Sells 100%.
  */
 export async function executeVirtualTrades(userId: string, analyses: any[]) {
     if (!adminDb) return;
@@ -150,7 +150,7 @@ export async function executeVirtualTrades(userId: string, analyses: any[]) {
             const currentPrice = analysis.currentPrice;
             const score = analysis.overallScore;
 
-            if (holdings[ticker] && score <= 45) { // RED Signal
+            if (holdings[ticker] && score <= 49) { // RED Signal
                 const amount = holdings[ticker].amount;
                 const saleValue = amount * currentPrice;
 
@@ -180,7 +180,7 @@ export async function executeVirtualTrades(userId: string, analyses: any[]) {
             const score = analysis.overallScore;
 
             // Don't buy if we already have it (Simple logic for now: 1 position per asset)
-            if (!holdings[ticker] && score >= 75 && cash >= 10) { // GREEN Signal
+            if (!holdings[ticker] && score >= 66 && cash >= 10) { // GREEN Signal
                 const buyAmountUSD = Math.min(50, cash); // Buy $50 chunks or remaining cash
                 const tokenAmount = buyAmountUSD / currentPrice;
 

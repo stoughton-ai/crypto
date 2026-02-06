@@ -198,9 +198,9 @@ export async function analyzeCrypto(ticker: string, historyContextString?: strin
     - Provide a concise "Why it matters" explanation based on current data.
 
     Finally, calculate an overall weighted score (0-100) and assign a Traffic Light:
-    - 75-100: GREEN
-    - 45-74: AMBER
-    - 0-44: RED
+    - 66-100: GREEN
+    - 50-65: AMBER
+    - 0-49: RED
 
     **HISTORICAL INSIGHT SECTION**:
     - Analyze the provided "HISTORICAL INTELLIGENCE" JSON data (if it exists).
@@ -330,7 +330,14 @@ export async function getSimplePrices(tickers: string[]) {
  * Robustly fetch prices for portfolio revaluation using the multi-source verification engine.
  */
 export async function getVerifiedPrices(tickers: string[]) {
-  const results: Record<string, { price: number; source: string; timestamp: number }> = {};
+  const results: Record<string, {
+    price: number;
+    source: string;
+    timestamp: number;
+    high24h?: number;
+    low24h?: number;
+    change24h?: number;
+  }> = {};
 
   // limit concurrency to avoid rate limits if necessary, but 5-10 should be fine
   await Promise.all(tickers.map(async (ticker) => {
@@ -339,7 +346,10 @@ export async function getVerifiedPrices(tickers: string[]) {
       results[ticker.toUpperCase()] = {
         price: data.price,
         source: data.verificationStatus,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        high24h: data.high24h,
+        low24h: data.low24h,
+        change24h: data.change24h
       };
     }
   }));
@@ -405,33 +415,58 @@ export async function getAgentConsultation(
  * Manually trigger the AI Agent to analyze the market and trade for the Virtual Portfolio.
  * Useful for the initial kickstart or testing.
  */
-export async function triggerAITrading(userId: string, initialAmount: number = 600) {
+import { adminDb } from "@/lib/firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
+
+/**
+ * Manually trigger the AI Agent to analyze the market, SAVE reports, and trade.
+ * This mirrors the Cron logic for user-initiated checks.
+ */
+export async function manualAgentCheck(userId: string, initialBalance: number = 600) {
   try {
-    // 1. Analyze Market
+    if (!adminDb) throw new Error("Admin SDK not initialized");
+
     const analysisResults: any[] = [];
+    let successCount = 0;
+
     await Promise.all(AGENT_WATCHLIST.map(async (ticker) => {
       try {
         const analysis = await analyzeCrypto(ticker);
-        // We allow "research" status for manual triggers if needed, or filter?
-        // Let's filter to be safe/consistent with Cron
+
+        // Filter out poor quality research for trading, but maybe save it? 
+        // Cron filters "research" status. Let's match Cron.
         if (!analysis.verificationStatus.toLowerCase().includes("research")) {
           analysisResults.push(analysis);
+
+          // SAVE REPORT TO LIBRARY (Crucial for "User wants to highlight change")
+          await adminDb!.collection('intel_reports').add({
+            ...analysis,
+            userId: userId,
+            savedAt: new Date().toISOString(),
+            createdAt: FieldValue.serverTimestamp(),
+            generatedBy: "ManualTrigger"
+          });
+          successCount++;
         }
       } catch (e) {
         console.error(`Analysis failed for ${ticker}`, e);
       }
     }));
 
-    if (analysisResults.length === 0) return { success: false, message: "No verified market data available." };
+    if (successCount === 0) return { success: false, message: "No verified market data available to act on." };
 
-    // 2. Init & Execute
-    await initVirtualPortfolio(userId, initialAmount);
+    // Execute Trades
+    await initVirtualPortfolio(userId, initialBalance);
     await executeVirtualTrades(userId, analysisResults);
 
-    return { success: true, message: `AI Agent executed trades based on ${analysisResults.length} signals.` };
+    return {
+      success: true,
+      message: `Agent processed ${successCount} assets. Reports saved to Library.`
+    };
+
   } catch (error) {
-    console.error("Manual AI Trading Error:", error);
-    return { success: false, message: "Failed to trigger AI trading." };
+    console.error("Manual Check Error:", error);
+    return { success: false, message: "Failed to run agent analysis." };
   }
 }
 

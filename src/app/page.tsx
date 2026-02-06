@@ -9,7 +9,7 @@ import { type AgentConsultationResult } from "@/lib/agent";
 import { fetchLibrary, saveToLibrary, deleteReport, migrateLegacyLibrary, clearLibrary, type LibraryReport } from "@/services/libraryService";
 import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, clearPortfolio, recordTrade, fetchRealizedTrades, type PortfolioItem, type PortfolioSnapshot, type RealizedTrade } from "@/services/portfolioService";
 import { getVirtualPortfolio, getVirtualTrades, getVirtualHistory, type VirtualPortfolio, type VirtualTrade } from "@/services/virtualPortfolioService";
-import { triggerAITrading, resetAIChallenge } from "./actions";
+import { manualAgentCheck, resetAIChallenge } from "./actions";
 import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
 import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign, Sparkles, PackageSearch, Settings } from "lucide-react";
 import NotificationSettings from "@/components/NotificationSettings";
@@ -59,12 +59,21 @@ export default function Home() {
     type: 'alert'
   });
 
+  const [isAIAgentPanelOpen, setIsAIAgentPanelOpen] = useState(false);
+
   const [modalInput, setModalInput] = useState("");
 
   // Portfolio State
   const [isPortfolioOpen, setIsPortfolioOpen] = useState(false);
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
-  const [portfolioPrices, setPortfolioPrices] = useState<Record<string, { price: number; source: string; timestamp: number }>>({});
+  const [portfolioPrices, setPortfolioPrices] = useState<Record<string, {
+    price: number;
+    source: string;
+    timestamp: number;
+    high24h?: number;
+    low24h?: number;
+    change24h?: number;
+  }>>({});
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
   const [realizedTrades, setRealizedTrades] = useState<RealizedTrade[]>([]);
   const [isAddingAsset, setIsAddingAsset] = useState(false);
@@ -301,7 +310,7 @@ export default function Home() {
         });
 
         try {
-          const res = await triggerAITrading(user.uid, amount);
+          const res = await manualAgentCheck(user.uid, amount);
           if (res.success) {
             await loadVirtualPortfolio();
             setModalConfig({
@@ -943,15 +952,6 @@ export default function Home() {
                 >
                   History
                 </button>
-                <button
-                  onClick={() => setPortfolioTab('ai_agent')}
-                  className={cn(
-                    "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all",
-                    portfolioTab === 'ai_agent' ? "bg-white text-slate-900 shadow-lg" : "text-slate-500 hover:text-white"
-                  )}
-                >
-                  AI Agent
-                </button>
               </div>
 
               {portfolioTab === 'ai_agent' && (
@@ -1010,13 +1010,13 @@ export default function Home() {
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 sm:gap-4 pt-4 mt-4 border-t border-violet-500/20">
-                          <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
+                          <div className="bg-white/5 rounded-2xl px-3 py-4 border border-white/5">
                             <p className="text-[10px] text-violet-300/80 uppercase font-bold mb-1">Cash</p>
-                            <p className="text-white font-mono font-bold">${(vpData.cashBalance || 0).toFixed(2)}</p>
+                            <p className="text-white font-mono font-bold leading-none">${(vpData.cashBalance || 0).toFixed(2)}</p>
                           </div>
-                          <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
+                          <div className="bg-white/5 rounded-2xl px-3 py-4 border border-white/5">
                             <p className="text-[10px] text-violet-300/80 uppercase font-bold mb-1">Invested</p>
-                            <p className="text-white font-mono font-bold">${Math.max(0, vpData.totalValue - vpData.cashBalance).toFixed(2)}</p>
+                            <p className="text-white font-mono font-bold leading-none">${Math.max(0, vpData.totalValue - vpData.cashBalance).toFixed(2)}</p>
                           </div>
                         </div>
                       </div>
@@ -1390,15 +1390,24 @@ export default function Home() {
                                 <div className="text-sm font-black text-white font-mono">
                                   {itemValue(item)}
                                 </div>
-                                {portfolioPrices[item.ticker] && (
-                                  <div className="mt-1 flex flex-col items-end opacity-70">
-                                    <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-emerald-400">
-                                      <ShieldCheck size={10} />
-                                      <span>Verified by {portfolioPrices[item.ticker].source}</span>
+                                {currentPrice && (
+                                  <div className="mt-1 flex flex-col items-end opacity-80 gap-0.5">
+                                    <div className="text-[10px] text-slate-300 font-mono">
+                                      Current: ${formatPrice(currentPrice.price)}
                                     </div>
-                                    <span className="text-[9px] text-slate-500">
-                                      {new Date(portfolioPrices[item.ticker].timestamp).toLocaleTimeString()}
-                                    </span>
+                                    <div className="flex items-center gap-2 text-[9px] font-mono text-slate-500">
+                                      {currentPrice.low24h && <span>L: ${formatPrice(currentPrice.low24h)}</span>}
+                                      {currentPrice.high24h && <span>H: ${formatPrice(currentPrice.high24h)}</span>}
+                                    </div>
+
+                                    <div className="text-[9px] text-slate-500 font-mono mt-0.5 opacity-75">
+                                      {new Date(currentPrice.timestamp).toLocaleTimeString()}
+                                    </div>
+
+                                    <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-emerald-400 mt-0.5 opacity-70">
+                                      <ShieldCheck size={10} />
+                                      <span>Verified by {currentPrice.source}</span>
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -1629,6 +1638,216 @@ export default function Home() {
         )}
       </AnimatePresence>
 
+      {/* AI Agent Sidebar */}
+      <AnimatePresence>
+        {isAIAgentPanelOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsAIAgentPanelOpen(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80]"
+            />
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-slate-900 border-l border-white/10 z-[90] shadow-2xl p-6 overflow-y-auto flex flex-col"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <div className="bg-violet-500/20 p-3 rounded-2xl">
+                    <Sparkles className="text-violet-400" size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black text-white uppercase tracking-tight">AI Agent</h2>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Autonomous Trading</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsAIAgentPanelOpen(false)}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col min-h-0 overflow-y-auto pr-1">
+                {!vpData ? (
+                  <div className="text-center p-8 border border-dashed border-slate-700 rounded-3xl">
+                    <div className="w-16 h-16 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/20">
+                      <Sparkles className="text-white" size={32} />
+                    </div>
+                    <h3 className="text-white font-bold mb-2">AI Trading Challenge</h3>
+                    <p className="text-slate-400 text-sm mb-6">
+                      Let the AI manage a virtual portfolio starting with your chosen amount. It will trade autonomously based on its own market analysis signals.
+                    </p>
+                    <button
+                      onClick={handleInitAIChallenge}
+                      disabled={isInitializingVP}
+                      className="bg-white text-slate-900 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
+                    >
+                      {isInitializingVP ? "Initializing..." : "Start AI Challenge"}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* AI Stats */}
+                    <div className={cn(
+                      "bg-gradient-to-br from-violet-900/50 to-fuchsia-900/20 border border-violet-500/20 rounded-3xl mb-6 relative overflow-hidden group",
+                      isMobile ? "p-4" : "p-6"
+                    )}>
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+
+                      <button
+                        onClick={handleResetAI}
+                        className="absolute top-4 right-4 p-2 rounded-xl bg-slate-900/50 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        title="Reset Challenge"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-violet-300/80">Total AI Value</p>
+                        <p className="text-[9px] font-bold text-violet-300/40 uppercase tracking-tighter">
+                          Started with ${(vpData.initialBalance || 600).toLocaleString()}
+                        </p>
+                      </div>
+
+                      <div className="text-3xl font-black text-white font-mono mb-1">
+                        ${vpData.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+
+                      <div className={cn(
+                        "flex items-center gap-1 text-sm font-bold",
+                        vpData.totalValue >= (vpData.initialBalance || 600) ? "text-emerald-400" : "text-red-400"
+                      )}>
+                        {vpData.totalValue >= (vpData.initialBalance || 600) ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                        {((vpData.totalValue - (vpData.initialBalance || 600)) / (vpData.initialBalance || 600) * 100).toFixed(2)}% ROI
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 sm:gap-4 pt-4 mt-4 border-t border-violet-500/20">
+                        <div className="bg-white/5 rounded-2xl px-3 py-4 border border-white/5">
+                          <p className="text-[10px] text-violet-300/80 uppercase font-bold mb-1">Cash</p>
+                          <p className="text-white font-mono font-bold leading-none">${(vpData.cashBalance || 0).toFixed(2)}</p>
+                        </div>
+                        <div className="bg-white/5 rounded-2xl px-3 py-4 border border-white/5">
+                          <p className="text-[10px] text-violet-300/80 uppercase font-bold mb-1">Invested</p>
+                          <p className="text-white font-mono font-bold leading-none">${Math.max(0, vpData.totalValue - vpData.cashBalance).toFixed(2)}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Monitoring & Research Status */}
+                    <div className="mb-8">
+                      <MonitoringStatus />
+                    </div>
+
+                    {/* AI History Chart */}
+                    {vpHistory.length > 1 && (
+                      <div className="mb-6 overflow-hidden">
+                        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Performance Trend</h3>
+                        <div className="h-32 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={vpHistory}>
+                              <defs>
+                                <linearGradient id="colorAIValue" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                                </linearGradient>
+                              </defs>
+                              <Tooltip
+                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
+                                itemStyle={{ color: '#fff' }}
+                                formatter={(value?: number) => [`$${value?.toFixed(2) ?? '0.00'}`, 'Total Value']}
+                                labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                              />
+                              <Area
+                                type="monotone"
+                                dataKey="totalValue"
+                                stroke="#8b5cf6"
+                                fillOpacity={1}
+                                fill="url(#colorAIValue)"
+                                strokeWidth={2}
+                              />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recent AI Trades */}
+                    <div className="border-t border-white/5 mt-12 mb-6" />
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                        <Activity size={12} /> AI Trades
+                      </h3>
+                      <span className="text-[10px] text-slate-600 font-mono uppercase tracking-widest">Live Execution Log</span>
+                    </div>
+                    <div className="space-y-4">
+                      {vpTrades.length === 0 ? (
+                        <div className="text-center py-8 bg-white/[0.02] rounded-3xl border border-dashed border-white/5">
+                          <p className="text-slate-500 text-sm italic">No trades recorded yet.</p>
+                        </div>
+                      ) : (
+                        vpTrades.slice(0, 10).map((trade) => (
+                          <div key={trade.id} className="relative group p-4 bg-white/[0.03] rounded-2xl border border-white/5 hover:border-violet-500/20 transition-all">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex items-center gap-3">
+                                <div className={cn(
+                                  "w-8 h-8 rounded-xl flex items-center justify-center font-bold text-[10px]",
+                                  trade.type === 'BUY' ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+                                )}>
+                                  {trade.ticker.slice(0, 2)}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-white font-bold">{trade.ticker}</span>
+                                    <span className={cn(
+                                      "text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter",
+                                      trade.type === 'BUY' ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                                    )}>
+                                      {trade.type}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500">{new Date(trade.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-black text-white font-mono">${trade.total.toFixed(2)}</p>
+                                <p className="text-[10px] text-slate-500">@{trade.price.toFixed(2)}</p>
+                              </div>
+                            </div>
+                            <div className="mt-2 text-[10px] text-slate-400 bg-black/20 p-2 rounded-lg border border-white/5 italic">
+                              "{trade.reason}"
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Explicit Reset Button */}
+                    <button
+                      onClick={handleResetAI}
+                      className="w-full mt-8 py-3 rounded-xl border border-red-500/20 text-red-400 text-xs font-bold uppercase tracking-widest hover:bg-red-500/10 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Trash2 size={14} /> Reset & Clear All AI Data
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-auto pt-6 border-t border-white/5 opacity-50 flex items-center justify-between text-[10px] uppercase font-bold text-slate-500 tracking-widest">
+                <span>Autonomous System</span>
+                <span>Active</span>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Settings Sidebar */}
       <AnimatePresence>
         {isSettingsOpen && (
@@ -1842,6 +2061,14 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-2 md:gap-4 w-full md:w-auto">
+          <button
+            onClick={() => setIsAIAgentPanelOpen(true)}
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 glass rounded-xl border-white/10 hover:border-violet-500/50 transition-all text-sm font-bold text-slate-300"
+          >
+            <Sparkles size={18} className="text-violet-400" />
+            <span>AI Agent</span>
+          </button>
+
           <button
             onClick={() => setIsPortfolioOpen(true)}
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 glass rounded-xl border-white/10 hover:border-blue-500/50 transition-all text-sm font-bold text-slate-300"

@@ -129,3 +129,29 @@ export const clearLibrary = async (userId: string) => {
         return false;
     }
 };
+
+export const getLatestScores = async (userId: string) => {
+    try {
+        // We fetch all (or limit to recent) and filter client-side for "latest per ticker"
+        // Index strategy: userId + savedAt desc
+        const reports = await fetchLibrary(userId);
+
+        // Group by ticker and take the first one (since they are sorted by date desc)
+        const latestMap: Record<string, { score: number, trafficLight: string }> = {};
+
+        for (const report of reports) {
+            const t = report.ticker.toUpperCase();
+            if (!latestMap[t]) {
+                latestMap[t] = {
+                    score: report.overallScore,
+                    trafficLight: report.trafficLight
+                };
+            }
+        }
+
+        return latestMap;
+    } catch (e) {
+        console.error("Error fetching latest scores", e);
+        return {};
+    }
+};
