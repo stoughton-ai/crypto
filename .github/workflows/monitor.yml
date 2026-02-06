@@ -1,0 +1,14 @@
+name: Monitor Cron
+on:
+  schedule:
+    - cron: '*/15 * * * *' # Run every 15 minutes
+  workflow_dispatch: # Allow manual trigger via GitHub UI
+
+jobs:
+  trigger-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Monitor Endpoint
+        run: |
+          echo "Triggering Monitor Cron..."
+          curl -v https://crypto-ten-drab.vercel.app/api/cron/monitor

@@ -17,13 +17,7 @@ export async function GET() {
     try {
         const now = new Date();
 
-        if (!adminDb) throw new Error("adminDb is null");
-
         // Find active users via their virtual portfolios (most reliable discovery)
-        const knownUid = "SF87h3pQoxfkkFfD7zCSOXgtz5h1";
-        const knownDoc = await adminDb.collection('users').doc(knownUid).collection('settings').doc('notifications').get();
-        console.log(`Cron: Manual Check ${knownUid}: ${JSON.stringify(knownDoc.data())}`);
-
         const vpSnapshot = await adminDb.collection('virtual_portfolio').get();
         console.log(`Cron: Scanning ${vpSnapshot.docs.length} users with active portfolios...`);
 
