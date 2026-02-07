@@ -326,6 +326,7 @@ export async function executeVirtualTrades(userId: string, analyses: any[]) {
             createdAt: FieldValue.serverTimestamp()
         });
     });
+    return; // Added return statement at the end of the transaction
 }
 
 // Helpers
