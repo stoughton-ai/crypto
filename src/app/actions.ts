@@ -387,7 +387,11 @@ export async function manualAgentCheck(userId: string, initialBalance: number = 
   let successCount = 0;
   for (const t of targets) {
     const res = await manualAgentAnalyzeSingle(userId, t);
-    if (res.success) successCount++;
+    if (res.success) {
+      successCount++;
+    } else {
+      console.warn(`[ManualCheck] Failed to analyze ${t}:`, res.message);
+    }
   }
   if (successCount > 0) {
     await manualAgentExecuteTrades(userId, initialBalance);
