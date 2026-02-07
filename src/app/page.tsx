@@ -100,6 +100,7 @@ export default function Home() {
   const [isPerformanceChartOpen, setIsPerformanceChartOpen] = useState(false);
   const [isTradesModalOpen, setIsTradesModalOpen] = useState(false);
   const [tradeLogPage, setTradeLogPage] = useState(1);
+  const [vpLoaded, setVpLoaded] = useState(false);
 
   // Agent State
   const [isAgentOpen, setIsAgentOpen] = useState(false);
@@ -383,6 +384,7 @@ export default function Home() {
       console.error("Failed to load VP", e);
     } finally {
       setAgentLoading(false);
+      setVpLoaded(true);
       setShowSuccess("AI Portfolio Synchronized");
       setTimeout(() => setShowSuccess(null), 2500);
     }
@@ -1155,22 +1157,43 @@ export default function Home() {
               {portfolioTab === 'ai_agent' && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col min-h-0 overflow-y-auto pr-1">
                   {!vpData ? (
-                    <div className="text-center p-8 border border-dashed border-slate-700 rounded-3xl">
-                      <div className="w-16 h-16 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/20">
-                        <Sparkles className="text-white" size={32} />
+                    (!vpLoaded || agentLoading) ? (
+                      <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+                        <div className="relative mb-6">
+                          <div className="w-20 h-20 bg-gradient-to-br from-violet-600/20 to-fuchsia-600/20 rounded-3xl flex items-center justify-center animate-pulse border border-violet-500/20">
+                            <Sparkles className="text-violet-400" size={40} />
+                          </div>
+                          <div className="absolute inset-0 animate-ping bg-violet-500/10 rounded-3xl" />
+                        </div>
+                        <h3 className="text-white text-xl font-bold mb-3 tracking-tight">AI Agent Synchronizing</h3>
+                        <p className="text-slate-400 text-sm max-w-[280px] leading-relaxed">
+                          We&apos;re currently retrieving your virtual portfolio state and verifying the latest market positions.
+                        </p>
+                        <div className="mt-8 flex items-center gap-2 px-4 py-2 bg-white/5 rounded-full border border-white/5">
+                          <div className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                          <div className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                          <div className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce" />
+                          <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 ml-1">Live Connection</span>
+                        </div>
                       </div>
-                      <h3 className="text-white font-bold mb-2">AI Trading Challenge</h3>
-                      <p className="text-slate-400 text-sm mb-6">
-                        Let the AI manage a virtual portfolio starting with your chosen amount. It will trade autonomously based on its own market analysis signals.
-                      </p>
-                      <button
-                        onClick={handleInitAIChallenge}
-                        disabled={isInitializingVP}
-                        className="bg-white text-slate-900 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
-                      >
-                        {isInitializingVP ? "Initializing..." : "Start AI Challenge"}
-                      </button>
-                    </div>
+                    ) : (
+                      <div className="text-center p-8 border border-dashed border-slate-700 rounded-3xl">
+                        <div className="w-16 h-16 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/20">
+                          <Sparkles className="text-white" size={32} />
+                        </div>
+                        <h3 className="text-white font-bold mb-2">AI Trading Challenge</h3>
+                        <p className="text-slate-400 text-sm mb-6">
+                          Let the AI manage a virtual portfolio starting with your chosen amount. It will trade autonomously based on its own market analysis signals.
+                        </p>
+                        <button
+                          onClick={handleInitAIChallenge}
+                          disabled={isInitializingVP}
+                          className="bg-white text-slate-900 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
+                        >
+                          {isInitializingVP ? "Initializing..." : "Start AI Challenge"}
+                        </button>
+                      </div>
+                    )
                   ) : (
                     <>
                       {/* AI Stats */}
