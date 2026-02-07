@@ -4,7 +4,7 @@ import { model, generateContentWithFallback, type CryptoAnalysisResult } from "@
 import { consultCryptoAgent, type AgentConsultationResult } from "@/lib/agent";
 import { type PortfolioItem } from "@/services/portfolioService";
 import { AGENT_WATCHLIST } from "@/lib/constants";
-import { initVirtualPortfolio, executeVirtualTrades, resetVirtualPortfolio } from "@/services/virtualPortfolioAdmin";
+import { initVirtualPortfolio, executeVirtualTrades, resetVirtualPortfolio, getAgentTargetsAdmin, updateAgentTargetsAdmin } from "@/services/virtualPortfolioAdmin";
 import { adminDb, firebaseAdmin } from "@/lib/firebase-admin";
 
 const COMMON_HEADERS = {
@@ -357,3 +357,32 @@ export async function getVerifiedPrices(tickers: string[]) {
   return res;
 }
 export async function deleteLegacyFile() { return true; }
+export async function getSimplePrices(tickers: string[]) {
+  const prices: Record<string, number> = {};
+  // Reuse the robust engine but return simple format
+  const verified = await getVerifiedPrices(tickers);
+  for (const t in verified) {
+    prices[t] = verified[t].price;
+  }
+  return prices;
+}
+
+export async function getLegacyReports() {
+  // Simple empty return as we are moving away from local JSON
+  return [];
+}
+
+export async function manualAgentCheck(userId: string, initialBalance: number = 600) {
+  // Wrapper for compatibility
+  const targets = await getAgentTargetsAdmin(userId);
+  let successCount = 0;
+  for (const t of targets) {
+    const res = await manualAgentAnalyzeSingle(userId, t);
+    if (res.success) successCount++;
+  }
+  if (successCount > 0) {
+    await manualAgentExecuteTrades(userId, initialBalance);
+    return { success: true };
+  }
+  return { success: false };
+}
