@@ -1,4 +1,5 @@
 import { generateContentWithFallback } from "./gemini";
+import { AGENT_WATCHLIST } from "./constants";
 
 export interface TradeSuggestion {
   action: "BUY" | "SELL" | "SWITCH" | "HOLD";
@@ -18,9 +19,9 @@ export interface AgentConsultationResult {
 
 export async function consultCryptoAgent(
   portfolioContext: any,
-  marketPrices: any
+  marketPrices: any,
+  watchlist: string[] = AGENT_WATCHLIST
 ): Promise<AgentConsultationResult> {
-  const watchlist = ['BTC', 'ETH', 'XRP', 'DOGE', 'SOL', 'GODS'];
 
   const prompt = `
     You are an expert AI Crypto Portfolio Manager with decades of experience in market cycles, technical analysis, and risk management.

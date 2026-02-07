@@ -33,7 +33,7 @@ export async function saveToLibrary(result: CryptoAnalysisResult) {
         id: Math.random().toString(36).substring(7),
     };
 
-    let reports = await getLibrary();
+    const reports = await getLibrary();
     reports.unshift(entry);
     await fs.writeFile(LIBRARY_PATH, JSON.stringify(reports, null, 2));
     return entry;

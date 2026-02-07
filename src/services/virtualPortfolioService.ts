@@ -13,6 +13,7 @@ import {
 const VP_COLLECTION = "virtual_portfolio";
 const VP_HISTORY_COLLECTION = "virtual_portfolio_history";
 const VP_TRADES_COLLECTION = "virtual_trades";
+const VP_DECISIONS_COLLECTION = "virtual_decisions";
 
 export interface VirtualPortfolio {
     userId: string;
@@ -93,3 +94,36 @@ export const getVirtualHistory = async (userId: string) => {
         return [];
     }
 }
+
+export interface VirtualDecision {
+    id?: string;
+    userId: string;
+    ticker: string;
+    action: 'BUY' | 'SELL' | 'HOLD' | 'SKIP';
+    reason: string;
+    score: number;
+    price: number;
+    date: string;
+}
+
+export const getVirtualDecisions = async (userId: string) => {
+    try {
+        const q = query(
+            collection(db, VP_DECISIONS_COLLECTION),
+            where("userId", "==", userId),
+            orderBy("date", "desc")
+        );
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VirtualDecision));
+    } catch (e) {
+        console.error("Error fetching VP decisions", e);
+        if (e instanceof Error && e.message.includes("index")) {
+            console.warn("Firestore index missing for VP decisions. Falling back to client-side sort.");
+            const qBasic = query(collection(db, VP_DECISIONS_COLLECTION), where("userId", "==", userId));
+            const snapshot = await getDocs(qBasic);
+            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VirtualDecision))
+                .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        }
+        return [];
+    }
+};

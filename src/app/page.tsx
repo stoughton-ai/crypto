@@ -1,19 +1,19 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, getVerifiedPrices, getAgentConsultation } from "./actions"; // Added getAgentConsultation
+import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, getVerifiedPrices, getAgentConsultation, getRealTimePrice, getAgentTargets, updateAgentTargets } from "./actions"; // Added getAgentConsultation
 import { AGENT_WATCHLIST } from "@/lib/constants";
 import { type CryptoAnalysisResult } from "@/lib/gemini";
 import { useAuth } from "@/context/AuthContext";
 import { type AgentConsultationResult } from "@/lib/agent";
 import { fetchLibrary, saveToLibrary, deleteReport, migrateLegacyLibrary, clearLibrary, type LibraryReport } from "@/services/libraryService";
-import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, clearPortfolio, recordTrade, fetchRealizedTrades, type PortfolioItem, type PortfolioSnapshot, type RealizedTrade } from "@/services/portfolioService";
-import { getVirtualPortfolio, getVirtualTrades, getVirtualHistory, type VirtualPortfolio, type VirtualTrade } from "@/services/virtualPortfolioService";
+import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, clearPortfolio, recordTrade, fetchRealizedTrades, getCashBalance, modifyCash, recordCashTransaction, purgeLegacyCashData, type PortfolioItem, type PortfolioSnapshot, type RealizedTrade, type TransactionHistoryItem } from "@/services/portfolioService";
+import { getVirtualPortfolio, getVirtualTrades, getVirtualHistory, getVirtualDecisions, type VirtualPortfolio, type VirtualTrade, type VirtualDecision } from "@/services/virtualPortfolioService";
 import { manualAgentCheck, resetAIChallenge } from "./actions";
-import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
-import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign, Sparkles, PackageSearch, Settings } from "lucide-react";
-import NotificationSettings from "@/components/NotificationSettings";
+import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from "recharts";
+import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign, Sparkles, PackageSearch, Settings, Check, Target } from "lucide-react";
 import MonitoringStatus from "@/components/MonitoringStatus";
+import PortfolioConsultationModal from "@/components/PortfolioConsultationModal";
 
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -66,6 +66,7 @@ export default function Home() {
   // Portfolio State
   const [isPortfolioOpen, setIsPortfolioOpen] = useState(false);
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
+  const [portfolioCash, setPortfolioCash] = useState(0);
   const [portfolioPrices, setPortfolioPrices] = useState<Record<string, {
     price: number;
     source: string;
@@ -75,10 +76,14 @@ export default function Home() {
     change24h?: number;
   }>>({});
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
-  const [realizedTrades, setRealizedTrades] = useState<RealizedTrade[]>([]);
+  const [realizedTrades, setRealizedTrades] = useState<TransactionHistoryItem[]>([]);
   const [isAddingAsset, setIsAddingAsset] = useState(false);
   const [editingAsset, setEditingAsset] = useState<PortfolioItem | null>(null);
   const [sellingAsset, setSellingAsset] = useState<PortfolioItem | null>(null);
+  const [isCashModalOpen, setIsCashModalOpen] = useState(false);
+  const [cashMode, setCashMode] = useState<'deposit' | 'withdraw'>('deposit');
+  const [cashAmountInput, setCashAmountInput] = useState("");
+  const [useCash, setUseCash] = useState(true);
   const [newAsset, setNewAsset] = useState({ ticker: "", amount: "", price: "", date: "" });
   const [sellData, setSellData] = useState({ amount: "", price: "", date: "" });
   const [lastLoggedValue, setLastLoggedValue] = useState<number | null>(null);
@@ -87,9 +92,14 @@ export default function Home() {
 
   // Virtual Portfolio State
   const [vpData, setVpData] = useState<VirtualPortfolio | null>(null);
+  const [vpPrices, setVpPrices] = useState<Record<string, { price: number; source: string; timestamp: number }>>({});
   const [vpTrades, setVpTrades] = useState<VirtualTrade[]>([]);
   const [vpHistory, setVpHistory] = useState<any[]>([]);
+  const [vpDecisions, setVpDecisions] = useState<VirtualDecision[]>([]);
   const [isInitializingVP, setIsInitializingVP] = useState(false);
+  const [isPerformanceChartOpen, setIsPerformanceChartOpen] = useState(false);
+  const [isTradesModalOpen, setIsTradesModalOpen] = useState(false);
+  const [tradeLogPage, setTradeLogPage] = useState(1);
 
   // Agent State
   const [isAgentOpen, setIsAgentOpen] = useState(false);
@@ -101,6 +111,11 @@ export default function Home() {
   // Auto-Retry State
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [showSuccess, setShowSuccess] = useState<string | null>(null);
+  const [syncProgress, setSyncProgress] = useState<{ currentTicker: string; index: number; total: number } | null>(null);
+  const [agentTargets, setAgentTargets] = useState<string[]>([]);
+  const [isTargetsModalOpen, setIsTargetsModalOpen] = useState(false);
+  const [newTargetTicker, setNewTargetTicker] = useState("");
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
@@ -138,10 +153,10 @@ export default function Home() {
     const unrealizedPct = totalInvested > 0 ? (unrealizedPnl / totalInvested) * 100 : 0;
 
     // Total historical cost = cost of CURRENT holdings + cost of everything ALREADY SOLD
-    const realizedCost = realizedTrades.reduce((acc, t) => acc + (t.sellAmount * t.costBasis), 0);
+    const realizedCost = realizedTrades.reduce((acc, t) => acc + (t.type === 'TRADE' ? (t.sellAmount * t.costBasis) : 0), 0);
     const totalHistoricalCost = totalInvested + realizedCost;
 
-    const totalRealized = realizedTrades.reduce((acc, t) => acc + t.realizedPnl, 0);
+    const totalRealized = realizedTrades.reduce((acc, t) => acc + (t.type === 'TRADE' ? t.realizedPnl : 0), 0);
     const allTimePnl = unrealizedPnl + totalRealized;
     const allTimePct = totalHistoricalCost > 0 ? (allTimePnl / totalHistoricalCost) * 100 : 0;
 
@@ -175,9 +190,9 @@ export default function Home() {
       loadLibrary();
       loadPortfolio();
       loadPortfolioHistory();
-      loadPortfolioHistory();
       loadRealizedTrades();
       loadVirtualPortfolio();
+      loadAgentTargets();
     }
   }, [user]);
 
@@ -214,12 +229,35 @@ export default function Home() {
   }, [retryCountdown]);
 
   useEffect(() => {
-    if (portfolioItems.length > 0) {
-      updatePortfolioPrices();
-      const interval = setInterval(updatePortfolioPrices, 60000); // Update prices every 60s using verified engine
-      return () => clearInterval(interval);
+    const hasPortfolio = portfolioItems.length > 0;
+    const hasVP = !!vpData;
+
+    if (hasPortfolio || hasVP) {
+      const refresh = () => {
+        if (hasPortfolio) updatePortfolioPrices();
+        if (hasVP) loadVirtualPortfolio();
+      };
+
+      // Initial refresh or when dependencies change
+      refresh();
+
+      const interval = setInterval(refresh, 60000); // Global refresh every 60s
+
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          console.log("App became visible, refreshing all portfolios...");
+          refresh();
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        clearInterval(interval);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
     }
-  }, [portfolioItems.length]);
+  }, [portfolioItems.length, !!vpData]);
 
   const loadLibrary = async () => {
     if (!user) return;
@@ -264,6 +302,8 @@ export default function Home() {
     if (!user) return;
     const data = await fetchPortfolio(user.uid);
     setPortfolioItems(data);
+    const cash = await getCashBalance(user.uid);
+    setPortfolioCash(cash);
   };
 
   const loadPortfolioHistory = async () => {
@@ -280,12 +320,116 @@ export default function Home() {
 
   const loadVirtualPortfolio = async () => {
     if (!user) return;
-    const data = await getVirtualPortfolio(user.uid);
-    setVpData(data);
-    const trades = await getVirtualTrades(user.uid);
-    setVpTrades(trades);
-    const history = await getVirtualHistory(user.uid);
-    setVpHistory(history);
+    setAgentLoading(true);
+    try {
+      const data = await getVirtualPortfolio(user.uid);
+
+      // Live Price Update Logic (Using Robust Verification Engine)
+      if (data && data.holdings && Object.keys(data.holdings).length > 0) {
+        try {
+          const tickers = Object.keys(data.holdings);
+          const verifiedPrices: Record<string, any> = {};
+
+          for (let i = 0; i < tickers.length; i++) {
+            const t = tickers[i];
+            setSyncProgress({ currentTicker: t, index: i + 1, total: tickers.length });
+
+            // Sequential Fetch with inherent retry logic inside getRealTimePrice
+            // We can also add a small delay here if needed
+            const priceData = await getRealTimePrice(t);
+            if (priceData) {
+              verifiedPrices[t.toUpperCase()] = {
+                price: priceData.price,
+                source: priceData.verificationStatus,
+                timestamp: Date.now(),
+                high24h: priceData.high24h,
+                low24h: priceData.low24h,
+                change24h: priceData.change24h
+              };
+            }
+          }
+          setSyncProgress(null);
+
+          // Save detailed price info to state for UI display
+          setVpPrices(verifiedPrices);
+
+          let liveHoldingsValue = 0;
+          tickers.forEach(t => {
+            const qty = data.holdings[t].amount;
+            const priceInfo = verifiedPrices[t.toUpperCase()];
+
+            // Fallback to average price only if verification fails completely
+            const currentPrice = priceInfo ? priceInfo.price : data.holdings[t].averagePrice;
+
+            liveHoldingsValue += qty * currentPrice;
+          });
+
+          // Update local display value
+          data.totalValue = data.cashBalance + liveHoldingsValue;
+        } catch (e) {
+          console.warn("Failed to update live VP prices", e);
+          setSyncProgress(null);
+        }
+      }
+
+      setVpData(data);
+      const trades = await getVirtualTrades(user.uid);
+      setVpTrades(trades);
+      const history = await getVirtualHistory(user.uid);
+      setVpHistory(history);
+      const decisions = await getVirtualDecisions(user.uid);
+      setVpDecisions(decisions);
+    } catch (e) {
+      console.error("Failed to load VP", e);
+    } finally {
+      setAgentLoading(false);
+      setShowSuccess("AI Portfolio Synchronized");
+      setTimeout(() => setShowSuccess(null), 2500);
+    }
+  };
+
+  const loadAgentTargets = async () => {
+    if (!user) return;
+    const targets = await getAgentTargets(user.uid);
+    setAgentTargets(targets);
+  };
+
+  const handleUpdateTargets = async (newTargets: string[]) => {
+    if (!user) return;
+    const res = await updateAgentTargets(user.uid, newTargets);
+    if (res.success) {
+      setAgentTargets(res.targets || newTargets);
+      setShowSuccess("Targets Updated");
+      setTimeout(() => setShowSuccess(null), 2000);
+    } else {
+      setModalConfig({
+        isOpen: true,
+        title: "Update Failed",
+        message: res.message || "Failed to update targets.",
+        type: 'danger'
+      });
+    }
+  };
+
+  const handleAddTarget = () => {
+    if (!newTargetTicker) return;
+    const ticker = newTargetTicker.toUpperCase().trim();
+    if (agentTargets.includes(ticker)) {
+      setModalConfig({ isOpen: true, title: "Duplicate", message: "Ticker already in targets.", type: 'alert' });
+      return;
+    }
+    if (agentTargets.length >= 15) {
+      setModalConfig({ isOpen: true, title: "Limit Reached", message: "Maximum 15 targets allowed.", type: 'alert' });
+      return;
+    }
+    const updated = [...agentTargets, ticker];
+    handleUpdateTargets(updated);
+    setNewTargetTicker("");
+  };
+
+  const handleRemoveTarget = (ticker: string) => {
+    const updated = agentTargets.filter(t => t !== ticker);
+    handleUpdateTargets(updated);
   };
 
   const handleInitAIChallenge = async () => {
@@ -380,17 +524,58 @@ export default function Home() {
     }
   };
 
+  const handleCashSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !cashAmountInput) return;
+
+    const amt = parseFloat(cashAmountInput);
+    if (isNaN(amt) || amt <= 0) return;
+
+    const change = cashMode === 'deposit' ? amt : -amt;
+
+    try {
+      await modifyCash(user.uid, change);
+      await recordCashTransaction(user.uid, cashMode.toUpperCase() as any, amt);
+
+      const newBal = await getCashBalance(user.uid);
+      setPortfolioCash(newBal);
+
+      setIsCashModalOpen(false);
+      setCashAmountInput("");
+      loadRealizedTrades();
+    } catch (e) {
+      console.error("Cash update failed", e);
+    }
+  };
+
+  const handleResetCash = async () => {
+    if (!user) return;
+    if (window.confirm("This will permanently delete all legacy 'US/USD' ticker entries and reset your cash wallet history to zero. This cannot be undone. Proceed?")) {
+      const success = await purgeLegacyCashData(user.uid);
+      if (success) {
+        alert("Wallet reset successfully.");
+        loadPortfolio();
+        loadRealizedTrades();
+      } else {
+        alert("Failed to reset wallet.");
+      }
+    }
+  };
+
   const handleSaveAsset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !newAsset.ticker || !newAsset.amount || !newAsset.price) return;
 
     try {
+      const amountVal = parseFloat(newAsset.amount);
+      const priceVal = parseFloat(newAsset.price);
+
       if (editingAsset) {
         // Update existing
         await updatePortfolioItem(editingAsset.id, {
           ticker: newAsset.ticker,
-          amount: parseFloat(newAsset.amount),
-          averagePrice: parseFloat(newAsset.price),
+          amount: amountVal,
+          averagePrice: priceVal,
           tradeDate: newAsset.date ? new Date(newAsset.date).toISOString() : editingAsset.tradeDate
         });
       } else {
@@ -398,10 +583,16 @@ export default function Home() {
         await addToPortfolio(
           user.uid,
           newAsset.ticker,
-          parseFloat(newAsset.amount),
-          parseFloat(newAsset.price),
+          amountVal,
+          priceVal,
           newAsset.date ? new Date(newAsset.date).toISOString() : new Date().toISOString()
         );
+
+        // Deduct from Cash if enabled
+        if (useCash) {
+          const cost = amountVal * priceVal;
+          await modifyCash(user.uid, -cost);
+        }
       }
 
       setNewAsset({ ticker: "", amount: "", price: "", date: "" });
@@ -419,6 +610,18 @@ export default function Home() {
     }
   };
 
+  const startAdding = () => {
+    setEditingAsset(null);
+    setNewAsset({
+      ticker: "",
+      amount: "",
+      price: "",
+      date: new Date().toISOString().split('T')[0]
+    });
+    setIsAddingAsset(true);
+    setSellingAsset(null);
+  };
+
   const startEditing = (item: PortfolioItem) => {
     setEditingAsset(item);
     setNewAsset({
@@ -433,6 +636,7 @@ export default function Home() {
 
   const startSelling = (item: PortfolioItem) => {
     setSellingAsset(item);
+    setUseCash(true);
     const currentPriceData = portfolioPrices[item.ticker];
     setSellData({
       amount: item.amount.toString(),
@@ -470,6 +674,12 @@ export default function Home() {
         await updatePortfolioItem(sellingAsset.id, {
           amount: sellingAsset.amount - sellAmt
         });
+      }
+
+      // Add to Cash if enabled
+      if (useCash) {
+        const proceeds = sellAmt * sellPx;
+        await modifyCash(user.uid, proceeds);
       }
 
       setSellingAsset(null);
@@ -608,7 +818,25 @@ export default function Home() {
     setIsRevaluing(true);
     try {
       const tickers = portfolioItems.map(p => p.ticker);
-      const verifiedPrices = await getVerifiedPrices(tickers);
+      const verifiedPrices: Record<string, any> = {};
+
+      for (let i = 0; i < tickers.length; i++) {
+        const t = tickers[i];
+        setSyncProgress({ currentTicker: t, index: i + 1, total: tickers.length });
+
+        const priceData = await getRealTimePrice(t);
+        if (priceData) {
+          verifiedPrices[t.toUpperCase()] = {
+            price: priceData.price,
+            source: priceData.verificationStatus,
+            timestamp: Date.now(),
+            high24h: priceData.high24h,
+            low24h: priceData.low24h,
+            change24h: priceData.change24h
+          };
+        }
+      }
+      setSyncProgress(null);
       setPortfolioPrices(prev => ({ ...prev, ...verifiedPrices }));
 
       // Update snapshot immediately with confirmed values
@@ -629,63 +857,15 @@ export default function Home() {
       });
     } finally {
       setIsRevaluing(false);
+      setShowSuccess("Portfolio Synchronized");
+      setTimeout(() => setShowSuccess(null), 2500);
     }
   };
 
-  const handleConsultAgent = async () => {
+  const handleConsultAgent = () => {
     if (!user || portfolioItems.length === 0) return;
-
-    setIsAgentOpen(true);
-    setAgentLoading(true);
     setAgentResult(null);
-    setAgentStatus("Initializing Market Scanner...");
-
-    try {
-      // CLIENT-SIDE RETRY LOOP for Visual Guidance
-      const maxRetries = 5;
-      let prices: Record<string, { price: number; source: string; timestamp: number }> = {};
-
-      // 1. Fetch Prices with Retry
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        setAgentStatus(attempt === 1
-          ? "Acquiring Verified Data Sources..."
-          : `Retrying Connection to Exchanges (${attempt}/${maxRetries})...`
-        );
-
-        // Find which are missing
-        const currentKeys = Object.keys(prices);
-        const missing = AGENT_WATCHLIST.filter(t => !currentKeys.includes(t));
-
-        if (missing.length === 0) break; // All good
-
-        // Fetch missing
-        const newPrices = await getVerifiedPrices(missing);
-        prices = { ...prices, ...newPrices };
-
-        // Check again
-        const stillMissing = AGENT_WATCHLIST.filter(t => !Object.keys(prices).includes(t));
-
-        if (stillMissing.length > 0 && attempt < maxRetries) {
-          // Wait 2s before retry
-          await new Promise(r => setTimeout(r, 2000));
-        } else if (stillMissing.length === 0) {
-          break;
-        }
-      }
-
-      setAgentStatus("Analyzing Portfolio Structure...");
-
-      // 2. Consult Agent with acquired prices
-      const result = await getAgentConsultation(portfolioItems, prices);
-      setAgentResult(result);
-
-    } catch (e) {
-      console.error(e);
-      setModalConfig({ isOpen: true, title: "Consultation Failed", message: "The agent could not complete the analysis.", type: "alert" });
-      setIsAgentOpen(false);
-    } finally {
-      setAgentLoading(false);
-    }
+    setIsAgentOpen(true);
   };
 
   if (authLoading) {
@@ -850,7 +1030,7 @@ export default function Home() {
 
       {/* Progress Notification */}
       <AnimatePresence>
-        {(loading || retryCountdown !== null || isRevaluing) && (
+        {(loading || retryCountdown !== null || isRevaluing || agentLoading || !!showSuccess) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -858,23 +1038,41 @@ export default function Home() {
             className={cn("fixed bottom-8 z-[150]", isMobile ? "left-1/2 -translate-x-1/2" : "right-8")}
           >
             <div className={cn(
-              "glass rounded-2xl p-6 shadow-2xl border-blue-500/30 flex items-center gap-4 min-w-[320px]",
-              retryCountdown !== null && "border-amber-500/30"
+              "glass rounded-2xl p-6 shadow-2xl flex items-center gap-4 min-w-[320px] transition-all duration-500",
+              showSuccess ? "border-emerald-500/40 bg-emerald-500/5 shadow-emerald-500/20" :
+                (retryCountdown !== null || agentLoading || isRevaluing) ? "border-amber-500/30 bg-amber-500/5" : "border-blue-500/30"
             )}>
               <div className="relative">
-                <Loader2 className={cn("animate-spin", retryCountdown !== null ? "text-amber-400" : "text-blue-400")} size={24} />
-                <div className={cn("absolute inset-0 animate-ping rounded-full", retryCountdown !== null ? "bg-amber-400/20" : "bg-blue-400/20")} />
+                {showSuccess ? (
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                    <Check className="text-emerald-400" size={16} />
+                  </div>
+                ) : (
+                  <>
+                    <Loader2 className={cn("animate-spin", (retryCountdown !== null || agentLoading || isRevaluing) ? "text-amber-400" : "text-blue-400")} size={24} />
+                    <div className={cn("absolute inset-0 animate-ping rounded-full", (retryCountdown !== null || agentLoading || isRevaluing) ? "bg-amber-400/20" : "bg-blue-400/20")} />
+                  </>
+                )}
               </div>
               <div>
                 <h4 className="font-bold text-white text-sm">
-                  {retryCountdown !== null ? "Intelligence Refinement" : isRevaluing ? "Verifying Asset Valuations" : "AI Analyst at Work"}
+                  {showSuccess ? "Verification Complete" :
+                    retryCountdown !== null ? "Intelligence Refinement" :
+                      syncProgress ? `Verifying ${syncProgress.currentTicker.toUpperCase()}` :
+                        agentLoading ? "Synchronizing AI Portfolio" :
+                          isRevaluing ? "Synchronizing My Portfolio" : "AI Analyst at Work"}
                 </h4>
-                <p className="text-xs text-slate-400 animate-pulse">
-                  {retryCountdown !== null
-                    ? `Low confidence data detected. Retrying in ${retryCountdown}s...`
-                    : isRevaluing
-                      ? "Cross-referencing Binance, CoinGecko & Kraken for confirmed pricing..."
-                      : "Searching live data & calculating 60/40 signals..."}
+                <p className="text-xs text-slate-400">
+                  {showSuccess ? showSuccess :
+                    retryCountdown !== null
+                      ? `Low confidence data detected. Retrying in ${retryCountdown}s...`
+                      : syncProgress
+                        ? `Asset ${syncProgress.index} of ${syncProgress.total} in progress...`
+                        : agentLoading
+                          ? "Fetching live market data and verifying AI positions..."
+                          : isRevaluing
+                            ? "Cross-referencing Binance, CoinGecko & Kraken for confirmed pricing..."
+                            : "Searching live data & calculating 60/40 signals..."}
                 </p>
               </div>
             </div>
@@ -982,13 +1180,29 @@ export default function Home() {
                       )}>
                         <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
 
-                        <button
-                          onClick={handleResetAI}
-                          className="absolute top-4 right-4 p-2 rounded-xl bg-slate-900/50 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                          title="Reset Challenge"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div className="absolute top-4 right-4 flex items-center gap-5">
+                          <button
+                            onClick={() => setIsTargetsModalOpen(true)}
+                            className="p-3 rounded-xl bg-slate-900/60 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all shadow-lg border border-white/5 active:scale-90"
+                            title="Manage Target Assets"
+                          >
+                            <Settings size={18} />
+                          </button>
+                          <button
+                            onClick={loadVirtualPortfolio}
+                            className="p-3 rounded-xl bg-slate-900/60 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all shadow-lg border border-white/5 active:scale-90"
+                            title="Refresh Prices"
+                          >
+                            <RefreshCw size={18} className={agentLoading ? "animate-spin" : ""} />
+                          </button>
+                          <button
+                            onClick={handleResetAI}
+                            className="p-3 rounded-xl bg-slate-900/60 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all shadow-lg border border-white/5 active:scale-90"
+                            title="Reset Challenge"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
 
                         <div className="flex items-center justify-between mb-1">
                           <p className="text-[10px] font-bold uppercase tracking-widest text-violet-300/80">Total AI Value</p>
@@ -1019,11 +1233,25 @@ export default function Home() {
                             <p className="text-white font-mono font-bold leading-none">${Math.max(0, vpData.totalValue - vpData.cashBalance).toFixed(2)}</p>
                           </div>
                         </div>
+                        {/* Verification Badge */}
+                        {Object.keys(vpPrices).length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-violet-500/10 flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <ShieldCheck size={10} className="text-emerald-400" />
+                              <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-500/80">
+                                Verified by {Object.values(vpPrices)[0]?.source || "Direct Exchange"}
+                              </span>
+                            </div>
+                            <span className="text-[9px] font-mono text-violet-300/40">
+                              {new Date(Object.values(vpPrices)[0]?.timestamp || Date.now()).toLocaleTimeString()}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Monitoring & Research Status */}
                       <div className="mb-8">
-                        <MonitoringStatus />
+                        <MonitoringStatus watchlist={agentTargets} />
                       </div>
 
                       {/* AI History Chart */}
@@ -1203,6 +1431,35 @@ export default function Home() {
                       </div>
                     </div>
 
+                    {/* Cash Wallet Card */}
+                    <div className="glass rounded-[2rem] border-white/5 p-4 flex items-center justify-between mb-4 relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+                      <div className="relative z-10">
+                        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1 flex items-center gap-1.5">
+                          <Wallet size={12} className="text-violet-400" /> Cash Balance
+                        </p>
+                        <div className="text-2xl font-black text-white font-mono tracking-tighter">
+                          ${portfolioCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 relative z-10">
+                        <button
+                          onClick={() => { setCashMode('withdraw'); setIsCashModalOpen(true); }}
+                          className="p-3 bg-white/5 hover:bg-red-500/10 hover:text-red-400 rounded-xl transition-all border border-white/5 group"
+                          title="Withdraw Cash"
+                        >
+                          <Minus size={16} className="group-hover:scale-110 transition-transform" />
+                        </button>
+                        <button
+                          onClick={() => { setCashMode('deposit'); setIsCashModalOpen(true); }}
+                          className="p-3 bg-white/5 hover:bg-emerald-500/10 hover:text-emerald-400 rounded-xl transition-all border border-white/5 group"
+                          title="Deposit Cash"
+                        >
+                          <Plus size={16} className="group-hover:scale-110 transition-transform" />
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Performance Sub-Grid */}
                     <div className="grid grid-cols-2 gap-4">
                       {/* Unrealized PNL */}
@@ -1347,19 +1604,33 @@ export default function Home() {
                   {/* Holdings List */}
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Asset Breakdown</h3>
-                    <button
-                      onClick={handleClearPortfolio}
-                      className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-red-400 transition-colors flex items-center gap-1"
-                    >
-                      <Trash2 size={12} /> Clear Portfolio
-                    </button>
+                    <div className="flex items-center gap-4">
+                      <button
+                        onClick={startAdding}
+                        className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-blue-400 transition-colors flex items-center gap-1"
+                      >
+                        <Plus size={12} /> Add Asset
+                      </button>
+                      <button
+                        onClick={handleClearPortfolio}
+                        className="text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-red-400 transition-colors flex items-center gap-1"
+                      >
+                        <Trash2 size={12} /> Clear Portfolio
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-4 pb-6">
                     {portfolioItems.length === 0 ? (
                       <div className="text-center py-12 text-slate-500 border border-dashed border-slate-800 rounded-3xl">
                         <PackageSearch size={32} className="mx-auto mb-2 opacity-50" />
-                        <p>No assets tracked yet.</p>
+                        <p className="mb-4">No assets tracked yet.</p>
+                        <button
+                          onClick={startAdding}
+                          className="mx-auto flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-all shadow-lg shadow-blue-500/20"
+                        >
+                          <Plus size={14} /> Add First Asset
+                        </button>
                       </div>
                     ) : (
                       portfolioItems.map((item) => {
@@ -1451,32 +1722,46 @@ export default function Home() {
                         <p>No transaction history yet.</p>
                       </div>
                     ) : (
-                      realizedTrades.map((trade) => (
-                        <div key={trade.id} className="glass rounded-xl p-4 border-white/5 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-bold text-xs text-slate-400">
-                              {trade.ticker.slice(0, 2)}
+                      realizedTrades.map((trade) => {
+                        const isTrade = trade.type === 'TRADE';
+                        const isDeposit = trade.type === 'DEPOSIT';
+                        const isWithdrawal = trade.type === 'WITHDRAWAL';
+
+                        return (
+                          <div key={trade.id} className="glass rounded-xl p-4 border-white/5 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs",
+                                isTrade ? "bg-slate-800 text-slate-400" : (isDeposit ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400")
+                              )}>
+                                {trade.ticker.slice(0, 2)}
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-white text-sm">{trade.ticker}</h4>
+                                <p className="text-[10px] text-slate-400">
+                                  {isTrade ? `Sold ${trade.sellAmount} @ ${trade.sellPrice}` : (isDeposit ? 'Cash Deposit' : 'Cash Withdrawal')}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <h4 className="font-bold text-white text-sm">{trade.ticker}</h4>
-                              <p className="text-[10px] text-slate-400">
-                                Sold {trade.sellAmount} @ ${trade.sellPrice}
+                            <div className="text-right">
+                              <div className={cn(
+                                "text-sm font-bold font-mono",
+                                isTrade
+                                  ? (trade.realizedPnl >= 0 ? "text-emerald-400" : "text-red-400")
+                                  : (isDeposit ? "text-emerald-400" : "text-red-400")
+                              )}>
+                                {isTrade
+                                  ? `${trade.realizedPnl >= 0 ? "+" : "-"}$${Math.abs(trade.realizedPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                  : `${isDeposit ? "+" : "-"}$${trade.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                }
+                              </div>
+                              <p className="text-[10px] text-slate-500 mt-0.5">
+                                {new Date(trade.date).toLocaleDateString('en-GB')}
                               </p>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className={cn(
-                              "text-sm font-bold font-mono",
-                              trade.realizedPnl >= 0 ? "text-emerald-400" : "text-red-400"
-                            )}>
-                              {trade.realizedPnl >= 0 ? "+" : "-"}${Math.abs(trade.realizedPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </div>
-                            <p className="text-[10px] text-slate-500 mt-0.5">
-                              {new Date(trade.date).toLocaleDateString('en-GB')}
-                            </p>
-                          </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -1547,6 +1832,22 @@ export default function Home() {
                           />
                         </div>
                       </div>
+
+                      {!editingAsset && (
+                        <div className="flex items-center gap-3 py-1 px-1">
+                          <input
+                            type="checkbox"
+                            id="useCashAdd"
+                            checked={useCash}
+                            onChange={(e) => setUseCash(e.target.checked)}
+                            className="w-4 h-4 rounded bg-black/40 border-white/20 text-blue-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                          />
+                          <label htmlFor="useCashAdd" className="text-xs text-slate-400 select-none cursor-pointer flex items-center gap-1">
+                            Deduct from Cash <span className="text-slate-500 text-[10px]">(${portfolioCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                          </label>
+                        </div>
+                      )}
+
                       <button
                         type="submit"
                         className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-widest shadow-lg shadow-blue-500/20 transition-all"
@@ -1619,6 +1920,20 @@ export default function Home() {
                           />
                         </div>
                       </div>
+
+                      <div className="flex items-center gap-3 py-1 px-1">
+                        <input
+                          type="checkbox"
+                          id="useCashSell"
+                          checked={useCash}
+                          onChange={(e) => setUseCash(e.target.checked)}
+                          className="w-4 h-4 rounded bg-black/40 border-white/20 text-emerald-500 focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                        />
+                        <label htmlFor="useCashSell" className="text-xs text-slate-400 select-none cursor-pointer flex items-center gap-1">
+                          Add to Cash <span className="text-slate-500 text-[10px]">(${portfolioCash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                        </label>
+                      </div>
+
                       <button
                         type="submit"
                         className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-widest shadow-lg shadow-red-500/20 transition-all"
@@ -1638,6 +1953,54 @@ export default function Home() {
         )}
       </AnimatePresence>
 
+      {/* Cash Manager Modal */}
+      <AnimatePresence>
+        {isCashModalOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="mt-6 p-6 glass rounded-[2rem] border-violet-500/30 shadow-2xl"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-bold text-white flex items-center gap-2 uppercase tracking-widest text-xs">
+                {cashMode === 'deposit' ? <Plus className="text-violet-400" size={14} /> : <Minus className="text-violet-400" size={14} />}
+                {cashMode === 'deposit' ? "Deposit Cash" : "Withdraw Cash"}
+              </h4>
+              <button onClick={() => { setIsCashModalOpen(false); setCashAmountInput(""); }} className="text-slate-500 hover:text-white transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleCashSubmit} className="space-y-4">
+              <div>
+                <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Amount (USD)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={cashAmountInput}
+                  onChange={(e) => setCashAmountInput(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:ring-1 focus:ring-violet-500 outline-none"
+                  required
+                  min="0.01"
+                />
+              </div>
+              <button
+                type="submit"
+                className={cn(
+                  "w-full font-bold py-2.5 rounded-xl text-xs uppercase tracking-widest shadow-lg transition-all text-white",
+                  cashMode === 'deposit'
+                    ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20"
+                    : "bg-red-600 hover:bg-red-500 shadow-red-500/20"
+                )}
+              >
+                {cashMode === 'deposit' ? "Confirm Deposit" : "Confirm Withdrawal"}
+              </button>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* AI Agent Sidebar */}
       <AnimatePresence>
         {isAIAgentPanelOpen && (
@@ -1654,16 +2017,22 @@ export default function Home() {
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-slate-900 border-l border-white/10 z-[90] shadow-2xl p-6 overflow-y-auto flex flex-col"
+              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-slate-900 border-l border-white/10 z-[90] shadow-2xl flex flex-col pt-6 pb-8 px-4 md:pt-[calc(env(safe-area-inset-top)+1.5rem)] md:pb-[env(safe-area-inset-bottom)] md:px-6"
             >
-              <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center justify-between mb-4 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="bg-violet-500/20 p-3 rounded-2xl">
                     <Sparkles className="text-violet-400" size={24} />
                   </div>
                   <div>
-                    <h2 className="text-xl font-black text-white uppercase tracking-tight">AI Agent</h2>
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Autonomous Trading</p>
+                    <h2 className="text-xl font-black text-white uppercase tracking-tight">
+                      <span className="md:hidden">AI</span>
+                      <span className="hidden md:inline">AI Agent</span>
+                    </h2>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">
+                      <span className="md:hidden">Auto Trading</span>
+                      <span className="hidden md:inline">Autonomous Trading</span>
+                    </p>
                   </div>
                 </div>
                 <button
@@ -1694,50 +2063,101 @@ export default function Home() {
                   </div>
                 ) : (
                   <>
-                    {/* AI Stats */}
-                    <div className={cn(
-                      "bg-gradient-to-br from-violet-900/50 to-fuchsia-900/20 border border-violet-500/20 rounded-3xl mb-6 relative overflow-hidden group",
-                      isMobile ? "p-4" : "p-6"
-                    )}>
+                    {/* AI Stats - Compact Redesign */}
+                    <div className="bg-gradient-to-br from-violet-900/50 to-fuchsia-900/20 border border-violet-500/20 rounded-3xl mb-6 relative overflow-hidden group shrink-0 p-4 md:p-5">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
 
-                      <button
-                        onClick={handleResetAI}
-                        className="absolute top-4 right-4 p-2 rounded-xl bg-slate-900/50 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                        title="Reset Challenge"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-
-                      <div className="flex items-center justify-between mb-1">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-violet-300/80">Total AI Value</p>
-                        <p className="text-[9px] font-bold text-violet-300/40 uppercase tracking-tighter">
-                          Started with ${(vpData.initialBalance || 600).toLocaleString()}
-                        </p>
+                      <div className="absolute top-4 right-4 flex items-center gap-5 z-10">
+                        <button
+                          onClick={loadVirtualPortfolio}
+                          className="p-3 rounded-xl bg-slate-900/60 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all shadow-lg border border-white/5 active:scale-90"
+                          title="Refresh Prices"
+                        >
+                          <RefreshCw size={18} className={agentLoading ? "animate-spin" : ""} />
+                        </button>
+                        <button
+                          onClick={handleResetAI}
+                          className="p-3 rounded-xl bg-slate-900/60 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all shadow-lg border border-white/5 active:scale-90"
+                          title="Reset Challenge"
+                        >
+                          <Trash2 size={18} />
+                        </button>
                       </div>
 
-                      <div className="text-3xl font-black text-white font-mono mb-1">
-                        ${vpData.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-
-                      <div className={cn(
-                        "flex items-center gap-1 text-sm font-bold",
-                        vpData.totalValue >= (vpData.initialBalance || 600) ? "text-emerald-400" : "text-red-400"
-                      )}>
-                        {vpData.totalValue >= (vpData.initialBalance || 600) ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                        {((vpData.totalValue - (vpData.initialBalance || 600)) / (vpData.initialBalance || 600) * 100).toFixed(2)}% ROI
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3 sm:gap-4 pt-4 mt-4 border-t border-violet-500/20">
-                        <div className="bg-white/5 rounded-2xl px-3 py-4 border border-white/5">
-                          <p className="text-[10px] text-violet-300/80 uppercase font-bold mb-1">Cash</p>
-                          <p className="text-white font-mono font-bold leading-none">${(vpData.cashBalance || 0).toFixed(2)}</p>
-                        </div>
-                        <div className="bg-white/5 rounded-2xl px-3 py-4 border border-white/5">
-                          <p className="text-[10px] text-violet-300/80 uppercase font-bold mb-1">Invested</p>
-                          <p className="text-white font-mono font-bold leading-none">${Math.max(0, vpData.totalValue - vpData.cashBalance).toFixed(2)}</p>
+                      <div className="mb-6">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-violet-300/80 mb-1">Total Portfolio Value</p>
+                        <div className="font-black text-white font-mono leading-none text-3xl md:text-4xl tracking-tighter">
+                          ${vpData.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                       </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        {/* Initial Investment Box */}
+                        <div className="bg-black/30 rounded-2xl px-4 py-3 border border-white/5 flex flex-col justify-center">
+                          <p className="text-[9px] text-violet-300/60 uppercase font-black tracking-widest mb-1">Initial Capital</p>
+                          <p className="text-white font-mono font-bold leading-none text-lg">
+                            ${(vpData.initialBalance || 600).toLocaleString()}
+                          </p>
+                        </div>
+
+                        {/* Profit/Loss Box */}
+                        <div className={cn(
+                          "rounded-2xl px-4 py-3 border flex flex-col justify-center",
+                          vpData.totalValue >= (vpData.initialBalance || 600)
+                            ? "bg-emerald-500/10 border-emerald-500/20"
+                            : "bg-red-500/10 border-red-500/20"
+                        )}>
+                          <p className={cn(
+                            "text-[9px] uppercase font-black tracking-widest mb-1",
+                            vpData.totalValue >= (vpData.initialBalance || 600) ? "text-emerald-400/60" : "text-red-400/60"
+                          )}>Profit / Loss</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className={cn(
+                              "font-mono font-black leading-none text-lg",
+                              vpData.totalValue >= (vpData.initialBalance || 600) ? "text-emerald-400" : "text-red-400"
+                            )}>
+                              {vpData.totalValue >= (vpData.initialBalance || 600) ? "+" : "-"}${Math.abs(vpData.totalValue - (vpData.initialBalance || 600)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                            <span className={cn(
+                              "text-[10px] font-bold",
+                              vpData.totalValue >= (vpData.initialBalance || 600) ? "text-emerald-500/50" : "text-red-500/50"
+                            )}>
+                              ({((vpData.totalValue - (vpData.initialBalance || 600)) / (vpData.initialBalance || 600) * 100).toFixed(1)}%)
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Cash Available */}
+                        <div className="bg-black/20 rounded-2xl px-4 py-3 border border-white/5 flex flex-col justify-center">
+                          <p className="text-[9px] text-violet-300/40 uppercase font-bold mb-1 tracking-wider">Cash Available</p>
+                          <p className="text-white font-mono font-bold leading-none text-lg opacity-80">
+                            ${(vpData.cashBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+
+                        {/* Invested Assets */}
+                        <div className="bg-black/20 rounded-2xl px-4 py-3 border border-white/5 flex flex-col justify-center">
+                          <p className="text-[9px] text-violet-300/40 uppercase font-bold mb-1 tracking-wider">Invested Assets</p>
+                          <p className="text-white font-mono font-bold leading-none text-lg opacity-80">
+                            ${Math.max(0, vpData.totalValue - vpData.cashBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Verification Badge */}
+                      {Object.keys(vpPrices).length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-violet-500/10 flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <ShieldCheck size={10} className="text-emerald-400" />
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-500/80">
+                              Verified by {Object.values(vpPrices)[0]?.source || "Direct Exchange"}
+                            </span>
+                          </div>
+                          <span className="text-[9px] font-mono text-violet-300/40">
+                            {new Date(Object.values(vpPrices)[0]?.timestamp || Date.now()).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Monitoring & Research Status */}
@@ -1746,82 +2166,75 @@ export default function Home() {
                     </div>
 
                     {/* AI History Chart */}
+                    {/* AI History Chart Button */}
                     {vpHistory.length > 1 && (
-                      <div className="mb-6 overflow-hidden">
-                        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Performance Trend</h3>
-                        <div className="h-32 w-full">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={vpHistory}>
-                              <defs>
-                                <linearGradient id="colorAIValue" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                                </linearGradient>
-                              </defs>
-                              <Tooltip
-                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
-                                itemStyle={{ color: '#fff' }}
-                                formatter={(value?: number) => [`$${value?.toFixed(2) ?? '0.00'}`, 'Total Value']}
-                                labelFormatter={(label) => new Date(label).toLocaleDateString()}
-                              />
-                              <Area
-                                type="monotone"
-                                dataKey="totalValue"
-                                stroke="#8b5cf6"
-                                fillOpacity={1}
-                                fill="url(#colorAIValue)"
-                                strokeWidth={2}
-                              />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
+                      <div className="mb-3">
+                        <button
+                          onClick={() => setIsPerformanceChartOpen(true)}
+                          className="w-full py-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-violet-500/30 transition-all flex items-center justify-center gap-2 group"
+                        >
+                          <TrendingUp className="text-violet-400 group-hover:scale-110 transition-transform" size={16} />
+                          <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">View Performance Trend</span>
+                        </button>
                       </div>
                     )}
 
-                    {/* Recent AI Trades */}
-                    <div className="border-t border-white/5 mt-12 mb-6" />
+                    {/* Recent AI Trades Button */}
+                    <button
+                      onClick={() => { setIsTradesModalOpen(true); setTradeLogPage(1); }}
+                      className="w-full py-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all flex items-center justify-center gap-2 group"
+                    >
+                      <Activity className="text-blue-400 group-hover:scale-110 transition-transform" size={16} />
+                      <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">View Trade Log</span>
+                    </button>
+
+
+                    {/* AI Decision Log */}
+                    <div className="border-t border-white/5 mt-8 mb-6" />
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-                        <Activity size={12} /> AI Trades
+                        <Sparkles size={12} /> AI Decision Logic
                       </h3>
-                      <span className="text-[10px] text-slate-600 font-mono uppercase tracking-widest">Live Execution Log</span>
+                      <span className="text-[10px] text-slate-600 font-mono uppercase tracking-widest">Reasoning Engine</span>
                     </div>
-                    <div className="space-y-4">
-                      {vpTrades.length === 0 ? (
-                        <div className="text-center py-8 bg-white/[0.02] rounded-3xl border border-dashed border-white/5">
-                          <p className="text-slate-500 text-sm italic">No trades recorded yet.</p>
+                    <div className="space-y-3 max-h-64 overflow-y-auto custom-scrollbar pr-2">
+                      {vpDecisions.length === 0 ? (
+                        <div className="text-center py-6 bg-white/[0.02] rounded-2xl border border-dashed border-white/5">
+                          <p className="text-slate-500 text-[10px] italic">No decision records found.</p>
                         </div>
                       ) : (
-                        vpTrades.slice(0, 10).map((trade) => (
-                          <div key={trade.id} className="relative group p-4 bg-white/[0.03] rounded-2xl border border-white/5 hover:border-violet-500/20 transition-all">
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex items-center gap-3">
-                                <div className={cn(
-                                  "w-8 h-8 rounded-xl flex items-center justify-center font-bold text-[10px]",
-                                  trade.type === 'BUY' ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
-                                )}>
-                                  {trade.ticker.slice(0, 2)}
-                                </div>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-white font-bold">{trade.ticker}</span>
-                                    <span className={cn(
-                                      "text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter",
-                                      trade.type === 'BUY' ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
-                                    )}>
-                                      {trade.type}
-                                    </span>
-                                  </div>
-                                  <p className="text-[10px] text-slate-500">{new Date(trade.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</p>
-                                </div>
+                        vpDecisions.map((decision) => (
+                          <div key={decision.id || Math.random()} className="flex gap-3 p-3 bg-white/[0.03] rounded-xl border border-white/5 hover:bg-white/[0.05] transition-colors">
+                            <div className={cn(
+                              "w-1 h-auto rounded-full",
+                              decision.action === 'BUY' ? "bg-emerald-500" :
+                                decision.action === 'SELL' ? "bg-red-500" :
+                                  decision.action === 'HOLD' ? "bg-blue-500" : "bg-slate-600"
+                            )} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-xs font-bold text-white flex items-center gap-2">
+                                  {decision.ticker}
+                                  <span className={cn(
+                                    "text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter opacity-80",
+                                    decision.action === 'BUY' ? "bg-emerald-500/20 text-emerald-400" :
+                                      decision.action === 'SELL' ? "bg-red-500/20 text-red-400" :
+                                        decision.action === 'HOLD' ? "bg-blue-500/20 text-blue-400" : "bg-slate-500/20 text-slate-400"
+                                  )}>
+                                    {decision.action}
+                                  </span>
+                                </span>
+                                <span className="text-[9px] text-slate-500 font-mono">
+                                  {new Date(decision.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
                               </div>
-                              <div className="text-right">
-                                <p className="text-sm font-black text-white font-mono">${trade.total.toFixed(2)}</p>
-                                <p className="text-[10px] text-slate-500">@{trade.price.toFixed(2)}</p>
+                              <p className="text-[10px] text-slate-400 leading-relaxed truncate group-hover:whitespace-normal group-hover:overflow-visible group-hover:bg-slate-900 group-hover:relative group-hover:z-10 transition-all">
+                                {decision.reason}
+                              </p>
+                              <div className="flex items-center gap-3 mt-1.5">
+                                <span className="text-[9px] text-slate-600 font-bold uppercase">Score: {decision.score}</span>
+                                {decision.price > 0 && <span className="text-[9px] text-slate-600 font-bold uppercase">Price: ${decision.price.toFixed(2)}</span>}
                               </div>
-                            </div>
-                            <div className="mt-2 text-[10px] text-slate-400 bg-black/20 p-2 rounded-lg border border-white/5 italic">
-                              "{trade.reason}"
                             </div>
                           </div>
                         ))
@@ -1842,6 +2255,188 @@ export default function Home() {
               <div className="mt-auto pt-6 border-t border-white/5 opacity-50 flex items-center justify-between text-[10px] uppercase font-bold text-slate-500 tracking-widest">
                 <span>Autonomous System</span>
                 <span>Active</span>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Performance Chart Modal */}
+      <AnimatePresence>
+        {isPerformanceChartOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsPerformanceChartOpen(false)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100]"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl px-4 z-[101]"
+            >
+              <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-violet-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+
+                <div className="flex items-center justify-between mb-8 relative z-10">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <TrendingUp className="text-violet-400" size={24} />
+                      Performance Trend
+                    </h2>
+                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Portfolio Value Over Time</p>
+                  </div>
+                  <button onClick={() => setIsPerformanceChartOpen(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-400 transition-colors">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="h-64 w-full relative z-10">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={vpHistory}>
+                      <defs>
+                        <linearGradient id="colorAIValueModal" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} opacity={0.3} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '12px', color: '#fff' }}
+                        itemStyle={{ color: '#fff' }}
+                        formatter={(value?: number) => [`$${value?.toFixed(2) ?? '0.00'}`, 'Total Value']}
+                        labelFormatter={(label) => new Date(label).toLocaleDateString() + ' ' + new Date(label).toLocaleTimeString()}
+                      />
+                      <XAxis
+                        dataKey="date"
+                        hide
+                      />
+                      <YAxis
+                        domain={['auto', 'auto']}
+                        tickFormatter={(val) => `$${val}`}
+                        tick={{ fill: '#64748b', fontSize: 10 }}
+                        stroke="#334155"
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="totalValue"
+                        stroke="#8b5cf6"
+                        fillOpacity={1}
+                        fill="url(#colorAIValueModal)"
+                        strokeWidth={3}
+                        animationDuration={1000}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Trade Log Modal */}
+      <AnimatePresence>
+        {isTradesModalOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsTradesModalOpen(false)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100]"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl px-4 z-[101]"
+            >
+              <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[80vh]">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+
+                <div className="flex items-center justify-between mb-8 relative z-10 shrink-0">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <Activity className="text-blue-400" size={24} />
+                      AI Trade Log
+                    </h2>
+                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Live Execution History</p>
+                  </div>
+                  <button onClick={() => setIsTradesModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-400 transition-colors">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 relative z-10 space-y-4">
+                  {vpTrades.length === 0 ? (
+                    <div className="text-center py-12 bg-white/[0.02] rounded-3xl border border-dashed border-white/5">
+                      <p className="text-slate-500 text-sm italic">No trades recorded yet.</p>
+                    </div>
+                  ) : (
+                    vpTrades.slice((tradeLogPage - 1) * 4, tradeLogPage * 4).map((trade) => (
+                      <div key={trade.id} className="relative group p-4 bg-white/[0.03] rounded-2xl border border-white/5 hover:border-blue-500/20 transition-all">
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs",
+                              trade.type === 'BUY' ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+                            )}>
+                              {trade.ticker.slice(0, 2)}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white font-bold text-lg">{trade.ticker}</span>
+                                <span className={cn(
+                                  "text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-tighter",
+                                  trade.type === 'BUY' ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                                )}>
+                                  {trade.type}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-500">{new Date(trade.date).toLocaleString([], { dateStyle: 'long', timeStyle: 'short' })}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-black text-white font-mono">${trade.total.toFixed(2)}</p>
+                            <p className="text-xs text-slate-500">@{trade.price.toFixed(2)}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 text-xs text-slate-400 bg-black/20 p-3 rounded-xl border border-white/5 italic">
+                          "{trade.reason}"
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Pagination Controls */}
+                {vpTrades.length > 4 && (
+                  <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between shrink-0 relative z-10">
+                    <button
+                      disabled={tradeLogPage === 1}
+                      onClick={() => setTradeLogPage(p => Math.max(1, p - 1))}
+                      className="flex items-center gap-1 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4" /> Prev
+                    </button>
+                    <span className="text-[10px] font-mono text-slate-500">
+                      {tradeLogPage} / {Math.ceil(vpTrades.length / 4)}
+                    </span>
+                    <button
+                      disabled={tradeLogPage >= Math.ceil(vpTrades.length / 4)}
+                      onClick={() => setTradeLogPage(p => p + 1)}
+                      className="flex items-center gap-1 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                    >
+                      Next <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             </motion.div>
           </>
@@ -1881,15 +2476,6 @@ export default function Home() {
 
               <div className="space-y-8">
                 <div>
-                  <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-blue-500 mb-6 flex items-center gap-2">
-                    <Activity size={14} /> Auto-Monitor configuration
-                  </h3>
-                  <div className="glass rounded-3xl p-6 border-white/5 bg-white/[0.02]">
-                    <NotificationSettings />
-                  </div>
-                </div>
-
-                <div className="pt-8 border-t border-white/5">
                   <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500 mb-4">Account Security</h3>
                   <div className="p-4 rounded-2xl bg-black/20 border border-white/5 flex items-center justify-between">
                     <div>
@@ -1900,6 +2486,22 @@ export default function Home() {
                       <ShieldCheck size={16} className="text-emerald-400" />
                     </div>
                   </div>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500 mb-4">Asset Management</h3>
+                  <button
+                    onClick={handleResetCash}
+                    className="w-full p-4 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-between group hover:bg-red-500/20 transition-all"
+                  >
+                    <div className="text-left">
+                      <p className="text-sm font-bold text-red-400 group-hover:text-red-300 transition-colors">Reset Portfolio Cash</p>
+                      <p className="text-[10px] text-slate-600 font-mono uppercase mt-1">Purge legacy US/USD data</p>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center">
+                      <Trash2 size={16} className="text-red-400" />
+                    </div>
+                  </button>
                 </div>
               </div>
 
@@ -2066,7 +2668,7 @@ export default function Home() {
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 glass rounded-xl border-white/10 hover:border-violet-500/50 transition-all text-sm font-bold text-slate-300"
           >
             <Sparkles size={18} className="text-violet-400" />
-            <span>AI Agent</span>
+            <span><span className="md:hidden">AI</span><span className="hidden md:inline">AI Agent</span></span>
           </button>
 
           <button
@@ -2162,22 +2764,6 @@ export default function Home() {
             {/* Price & Signal Overview */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-
-              {/* Mobile Only: Report Ready Info */}
-              {isMobile && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="glass rounded-2xl p-4 flex items-center gap-3 border border-blue-500/30 bg-blue-500/5 mb-8"
-                >
-                  <Info className="text-blue-400 shrink-0" size={24} />
-                  <div className="text-left">
-                    <h4 className="font-bold text-white text-sm">Analysis Complete</h4>
-                    <p className="text-xs text-slate-400">Your full intelligence report is ready below.</p>
-                  </div>
-                </motion.div>
-              )}
-
               {/* Traffic Light Signal */}
               <div className="glass rounded-3xl p-8 flex flex-col items-center justify-center text-center">
                 <h3 className="text-slate-400 font-medium mb-6 flex items-center gap-2">
@@ -2262,63 +2848,37 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mt-auto">
+                <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4 mt-auto">
                   <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">
-                      {result.dailyLow ? "Daily Low" : "ATL"}
-                    </div>
-                    <div className="text-lg md:text-xl font-mono font-bold text-red-400/90">
-                      ${formatPrice(result.dailyLow || result.allTimeLow)}
-                    </div>
-                    <div className="text-[9px] text-slate-500 font-medium font-mono">
-                      +{Math.abs(((result.currentPrice - (result.dailyLow || result.allTimeLow)) / (result.dailyLow || result.allTimeLow)) * 100).toFixed(1)}%
-                    </div>
+                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">Daily Low</div>
+                    <div className="text-lg md:text-xl font-mono font-bold text-red-400/90">${formatPrice(result.dailyLow)}</div>
                   </div>
 
                   <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">
-                      {result.dailyHigh ? "Daily High" : "ATH"}
-                    </div>
-                    <div className="text-lg md:text-xl font-mono font-bold text-emerald-400/90">
-                      ${formatPrice(result.dailyHigh || result.allTimeHigh)}
-                    </div>
-                    <div className="text-[9px] text-slate-500 font-medium font-mono">
-                      -{Math.abs(((result.currentPrice - (result.dailyHigh || result.allTimeHigh)) / (result.dailyHigh || result.allTimeHigh)) * 100).toFixed(1)}%
-                    </div>
+                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">Daily High</div>
+                    <div className="text-lg md:text-xl font-mono font-bold text-emerald-400/90">${formatPrice(result.dailyHigh)}</div>
                   </div>
 
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors group relative">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">
-                      7D Avg <Info size={10} className="hidden xs:block opacity-50" />
-                    </div>
-                    <div className="text-lg md:text-xl font-mono font-bold">
-                      {result.price7dAvg > 0 ? `$${formatPrice(result.price7dAvg)}` : "N/A"}
-                    </div>
-                    <div className={cn(
-                      "text-xs font-bold",
-                      (result.price7dAvg > 0 && result.currentPrice >= result.price7dAvg) ? "text-emerald-500" : "text-red-500"
-                    )}>
-                      {result.price7dAvg > 0
-                        ? `${(((result.currentPrice - result.price7dAvg) / result.price7dAvg) * 100).toFixed(1)}%`
-                        : "N/A"}
-                    </div>
+                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">7D Avg</div>
+                    <div className="text-lg md:text-xl font-mono font-bold">{result.price7dAvg > 0 ? `$${formatPrice(result.price7dAvg)}` : "N/A"}</div>
                   </div>
 
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors group relative">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">
-                      30D Avg <Info size={10} className="hidden xs:block opacity-50" />
-                    </div>
-                    <div className="text-lg md:text-xl font-mono font-bold">
-                      {result.price30dAvg > 0 ? `$${formatPrice(result.price30dAvg)}` : "N/A"}
-                    </div>
-                    <div className={cn(
-                      "text-xs font-bold",
-                      (result.price30dAvg > 0 && result.currentPrice >= result.price30dAvg) ? "text-emerald-500" : "text-red-500"
-                    )}>
-                      {result.price30dAvg > 0
-                        ? `${(((result.currentPrice - result.price30dAvg) / result.price30dAvg) * 100).toFixed(1)}%`
-                        : "N/A"}
-                    </div>
+                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">30D Avg</div>
+                    <div className="text-lg md:text-xl font-mono font-bold">{result.price30dAvg > 0 ? `$${formatPrice(result.price30dAvg)}` : "N/A"}</div>
+                  </div>
+
+                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">ATH</div>
+                    <div className="text-lg md:text-xl font-mono font-bold text-amber-400">${formatPrice(result.allTimeHigh)}</div>
+                    <div className="text-[9px] text-slate-500 font-medium font-mono">{result.athDate || "N/A"}</div>
+                  </div>
+
+                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">ATL</div>
+                    <div className="text-lg md:text-xl font-mono font-bold text-violet-400">${formatPrice(result.allTimeLow)}</div>
+                    <div className="text-[9px] text-slate-500 font-medium font-mono">{result.atlDate || "N/A"}</div>
                   </div>
                 </div>
               </div>
@@ -2445,9 +3005,23 @@ export default function Home() {
           </div>
         )
       }
+      {/* Portfolio Consultation Modal (Visual Process) */}
+      <AnimatePresence>
+        {isAgentOpen && !agentResult && (
+          <PortfolioConsultationModal
+            isOpen={isAgentOpen}
+            onClose={() => setIsAgentOpen(false)}
+            portfolioItems={portfolioItems}
+            watchlist={agentTargets}
+            userId={user?.uid || ''}
+            onResult={(res) => setAgentResult(res)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* AI Agent Modal */}
       <AnimatePresence>
-        {isAgentOpen && (
+        {isAgentOpen && agentResult && (
           <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0 }}
@@ -2481,81 +3055,147 @@ export default function Home() {
                 </div>
               </div>
 
-              {agentLoading ? (
-                <div className="py-20 text-center">
-                  <Loader2 className="animate-spin text-fuchsia-500 mx-auto mb-6" size={48} />
-                  <h3 className="text-xl font-bold text-white mb-2">{agentStatus}</h3>
-                  <p className="text-slate-400 text-sm max-w-sm mx-auto">
-                    Scanning the watchlist (BTC, ETH, XRP, DOGE, SOL, GODS) for optimal switch signals...
-                  </p>
+              <div className="space-y-8">
+                {/* Verified Data Source Display */}
+                {agentResult.verifiedPrices && Object.keys(agentResult.verifiedPrices).length > 0 && (
+                  <div className="bg-emerald-500/5 rounded-2xl p-4 border border-emerald-500/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <ShieldCheck className="text-emerald-400" size={16} />
+                      <h4 className="text-xs font-bold uppercase tracking-widest text-emerald-500">Verified Live Data Source</h4>
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {Object.entries(agentResult.verifiedPrices).map(([ticker, price]) => (
+                        <div key={ticker} className="bg-slate-900/50 rounded-lg p-2 text-center border border-emerald-500/10">
+                          <div className="text-[10px] font-bold text-slate-500">{ticker}</div>
+                          <div className="text-xs font-mono font-bold text-emerald-400">${price.price?.toLocaleString() || price.toLocaleString()}</div>
+                          {price.source && <div className="text-[8px] text-slate-600 mt-1">{price.source}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-white/5 rounded-2xl p-6 border border-white/5">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Market Overview</h4>
+                  <p className="text-slate-300 leading-relaxed italic text-justify">&quot;{agentResult.summary}&quot;</p>
                 </div>
-              ) : agentResult ? (
-                <div className="space-y-8">
-                  {/* Verified Data Source Display */}
-                  {agentResult.verifiedPrices && Object.keys(agentResult.verifiedPrices).length > 0 && (
-                    <div className="bg-emerald-500/5 rounded-2xl p-4 border border-emerald-500/20">
-                      <div className="flex items-center gap-2 mb-3">
-                        <ShieldCheck className="text-emerald-400" size={16} />
-                        <h4 className="text-xs font-bold uppercase tracking-widest text-emerald-500">Verified Live Data Source</h4>
-                      </div>
-                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                        {Object.entries(agentResult.verifiedPrices).map(([ticker, price]) => (
-                          <div key={ticker} className="bg-slate-900/50 rounded-lg p-2 text-center border border-emerald-500/10">
-                            <div className="text-[10px] font-bold text-slate-500">{ticker}</div>
-                            <div className="text-xs font-mono font-bold text-emerald-400">${price.price?.toLocaleString() || price.toLocaleString()}</div>
-                            {price.source && <div className="text-[8px] text-slate-600 mt-1">{price.source}</div>}
+
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Strategic Moves</h4>
+                  {agentResult.suggestions.length === 0 ? (
+                    <div className="text-center py-8 border border-dashed border-white/10 rounded-2xl">
+                      <ShieldCheck className="mx-auto text-emerald-500 mb-3" size={32} />
+                      <p className="text-white font-bold">No Actions Recommended</p>
+                      <p className="text-sm text-slate-500 mt-1">Your portfolio is currently positioned optimally.</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4">
+                      {agentResult.suggestions.map((move, i) => (
+                        <div key={i} className="glass p-6 rounded-2xl border-white/10 flex flex-col md:flex-row gap-6 items-start md:items-center">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <span className={cn(
+                                "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest",
+                                move.action === "SWITCH" ? "bg-blue-500/20 text-blue-400" : "bg-emerald-500/20 text-emerald-400"
+                              )}>{move.action}</span>
+                              <span className="text-xs font-bold text-slate-400">Confidence: {move.confidenceScore}%</span>
+                            </div>
+                            <h4 className="text-lg font-bold text-white mb-2">
+                              {move.action === "SWITCH"
+                                ? <span>Sell <span className="text-red-400">{move.percentage}% of {move.sellTicker}</span> to Buy <span className="text-emerald-400">{move.buyTicker}</span></span>
+                                : <span>{move.action} {move.buyTicker || move.sellTicker}</span>
+                              }
+                            </h4>
+                            <p className="text-sm text-slate-400 text-justify">{move.reason}</p>
                           </div>
-                        ))}
-                      </div>
+                          <div className="shrink-0 w-full md:w-auto">
+                            <button className="w-full md:w-auto px-6 py-3 bg-white text-slate-900 font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-slate-200 transition-colors">
+                              Prepare Trade
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
+                </div>
+              </div>
 
-                  <div className="bg-white/5 rounded-2xl p-6 border border-white/5">
-                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Market Overview</h4>
-                    <p className="text-slate-300 leading-relaxed italic text-justify">&quot;{agentResult.summary}&quot;</p>
-                  </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Strategic Moves</h4>
-                    {agentResult.suggestions.length === 0 ? (
-                      <div className="text-center py-8 border border-dashed border-white/10 rounded-2xl">
-                        <ShieldCheck className="mx-auto text-emerald-500 mb-3" size={32} />
-                        <p className="text-white font-bold">No Actions Recommended</p>
-                        <p className="text-sm text-slate-500 mt-1">Your portfolio is currently positioned optimally.</p>
+      {/* AI Agent Targets Modal */}
+      <AnimatePresence>
+        {isTargetsModalOpen && (
+          <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Target className="text-violet-400" /> AI Target Assets
+                </h3>
+                <button
+                  onClick={() => setIsTargetsModalOpen(false)}
+                  className="p-2 rounded-xl hover:bg-white/5 text-slate-400 transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newTargetTicker}
+                    onChange={(e) => setNewTargetTicker(e.target.value.toUpperCase())}
+                    placeholder="ENTER TICKER (e.g. SOL)"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none focus:border-violet-500/50 transition-all"
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddTarget()}
+                  />
+                  <button
+                    onClick={handleAddTarget}
+                    className="bg-violet-600 hover:bg-violet-500 text-white px-4 py-3 rounded-xl font-bold transition-all"
+                  >
+                    <Plus size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                  {agentTargets.map((t) => (
+                    <div key={t} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5 group">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center text-violet-400 font-bold text-xs">
+                          {t.slice(0, 2)}
+                        </div>
+                        <span className="text-white font-bold">{t}</span>
                       </div>
-                    ) : (
-                      <div className="grid gap-4">
-                        {agentResult.suggestions.map((move, i) => (
-                          <div key={i} className="glass p-6 rounded-2xl border-white/10 flex flex-col md:flex-row gap-6 items-start md:items-center">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-3 mb-2">
-                                <span className={cn(
-                                  "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest",
-                                  move.action === "SWITCH" ? "bg-blue-500/20 text-blue-400" : "bg-emerald-500/20 text-emerald-400"
-                                )}>{move.action}</span>
-                                <span className="text-xs font-bold text-slate-400">Confidence: {move.confidenceScore}%</span>
-                              </div>
-                              <h4 className="text-lg font-bold text-white mb-2">
-                                {move.action === "SWITCH"
-                                  ? <span>Sell <span className="text-red-400">{move.percentage}% of {move.sellTicker}</span> to Buy <span className="text-emerald-400">{move.buyTicker}</span></span>
-                                  : <span>{move.action} {move.buyTicker || move.sellTicker}</span>
-                                }
-                              </h4>
-                              <p className="text-sm text-slate-400 text-justify">{move.reason}</p>
-                            </div>
-                            <div className="shrink-0 w-full md:w-auto">
-                              <button className="w-full md:w-auto px-6 py-3 bg-white text-slate-900 font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-slate-200 transition-colors">
-                                Prepare Trade
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                      <button
+                        onClick={() => handleRemoveTarget(t)}
+                        className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {agentTargets.length === 0 && (
+                    <p className="text-center text-slate-500 text-sm py-4 italic">No targets defined. AI will use defaults.</p>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t border-white/5">
+                  <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                    <span>Active Targets</span>
+                    <span className={cn(agentTargets.length >= 15 ? "text-red-400" : "text-violet-400")}>
+                      {agentTargets.length} / 15
+                    </span>
                   </div>
                 </div>
-              ) : null}
-
+              </div>
             </motion.div>
           </div>
         )}

@@ -72,8 +72,13 @@ export async function GET() {
             let successCount = 0;
             let analysisResults: any[] = [];
 
+            // Fetch User Targets
+            const vpRef = adminDb!.collection('virtual_portfolio').doc(user.uid);
+            const vpSnap = await vpRef.get();
+            const targets = vpSnap.exists ? (vpSnap.data()?.targets || AGENT_WATCHLIST) : AGENT_WATCHLIST;
+
             // Generate Reports for WL
-            await Promise.all(AGENT_WATCHLIST.map(async (ticker) => {
+            await Promise.all(targets.map(async (ticker: string) => {
                 try {
                     const analysis = await analyzeCrypto(ticker);
 

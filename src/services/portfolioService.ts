@@ -35,6 +35,33 @@ export interface PortfolioItem {
     tradeDate?: string;
 }
 
+const CASH_HISTORY_COLLECTION = "cash_history";
+
+export interface CashHistoryItem {
+    id: string;
+    userId: string;
+    type: 'DEPOSIT' | 'WITHDRAWAL';
+    amount: number;
+    date: string;
+    createdAt: Timestamp;
+}
+
+export const recordCashTransaction = async (userId: string, type: 'DEPOSIT' | 'WITHDRAWAL', amount: number) => {
+    try {
+        await addDoc(collection(db, CASH_HISTORY_COLLECTION), {
+            userId,
+            type,
+            amount,
+            date: new Date().toISOString(),
+            createdAt: Timestamp.now(),
+        });
+        return true;
+    } catch (error) {
+        console.error("Error recording cash transaction:", error);
+        return false;
+    }
+};
+
 export const addToPortfolio = async (userId: string, ticker: string, amount: number, averagePrice: number, tradeDate?: string) => {
     try {
         const docRef = await addDoc(collection(db, PORTFOLIO_COLLECTION), {
@@ -168,6 +195,10 @@ export interface RealizedTrade {
     createdAt: Timestamp;
 }
 
+// ... (no changes to this block yet, need to verify page.tsx)
+
+
+
 export const recordTrade = async (userId: string, ticker: string, sellAmount: number, sellPrice: number, costBasis: number, date?: string) => {
     try {
         const realizedPnl = (sellPrice - costBasis) * sellAmount;
@@ -188,33 +219,129 @@ export const recordTrade = async (userId: string, ticker: string, sellAmount: nu
     }
 };
 
-export const fetchRealizedTrades = async (userId: string) => {
+export type TransactionHistoryItem =
+    | (RealizedTrade & { type: 'TRADE' })
+    | (CashHistoryItem & { ticker: 'USD' });
+
+export const fetchRealizedTrades = async (userId: string): Promise<TransactionHistoryItem[]> => {
     try {
-        const q = query(
+        // Fetch Trades
+        const tradesQuery = query(
             collection(db, REALIZED_PNL_COLLECTION),
-            where("userId", "==", userId),
-            orderBy("createdAt", "desc")
+            where("userId", "==", userId)
         );
-        const querySnapshot = await getDocs(q);
-        return querySnapshot.docs.map(doc => ({
+        const tradesSnap = await getDocs(tradesQuery);
+        const trades = tradesSnap.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
-        } as RealizedTrade));
+            ...doc.data(),
+            type: 'TRADE' as const
+        } as TransactionHistoryItem));
+
+        // Fetch Cash History
+        const cashQuery = query(
+            collection(db, CASH_HISTORY_COLLECTION),
+            where("userId", "==", userId)
+        );
+        const cashSnap = await getDocs(cashQuery);
+        const cash = cashSnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            ticker: 'USD'
+        } as TransactionHistoryItem));
+
+        // Merge and Sort
+        const all = [...trades, ...cash];
+        return all.sort((a, b) => {
+            const dateA = a.date ? new Date(a.date).getTime() : 0;
+            const dateB = b.date ? new Date(b.date).getTime() : 0;
+            return dateB - dateA; // Descending
+        });
     } catch (error) {
-        console.error("Error fetching realized trades:", error);
-        // Fallback for missing index
-        if (error instanceof Error && error.message.includes("index")) {
-            const qBasic = query(collection(db, REALIZED_PNL_COLLECTION), where("userId", "==", userId));
-            const snapshot = await getDocs(qBasic);
-            return snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            } as RealizedTrade)).sort((a: any, b: any) => {
-                const timeA = a.createdAt?.toMillis() || 0;
-                const timeB = b.createdAt?.toMillis() || 0;
-                return timeB - timeA;
-            });
-        }
+        console.error("Error fetching transaction history:", error);
         return [];
+    }
+};
+
+const CASH_COLLECTION = "cash_balances";
+
+export interface CashBalance {
+    userId: string;
+    balance: number;
+    updatedAt: string;
+}
+
+export const getCashBalance = async (userId: string): Promise<number> => {
+    try {
+        const docRef = doc(db, CASH_COLLECTION, userId);
+        const snapshot = await getDocs(query(collection(db, CASH_COLLECTION), where("userId", "==", userId)));
+
+        if (snapshot.empty) {
+            return 0;
+        }
+        return snapshot.docs[0].data().balance || 0;
+    } catch (error) {
+        console.error("Error fetching cash:", error);
+        return 0;
+    }
+};
+
+export const updateCashBalance = async (userId: string, newBalance: number) => {
+    try {
+        // We use setDoc with merge or create if not exists
+        // Since we are using queries above, let's stick to a consistent ID strategy.
+        // Let's assume document ID IS the userId for simplicity/efficiency? 
+        // In the get above I used query. Let's switch to doc lookup if possible, but for safety with existing data (none) let's be robust.
+        // Actually, let's force docId = userId for new standard.
+
+        const { setDoc, getDoc } = await import("firebase/firestore"); // Dynamic import to avoid top-level changes if possible, or just use what we have
+        const docRef = doc(db, CASH_COLLECTION, userId);
+        await setDoc(docRef, {
+            userId,
+            balance: newBalance,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+        return true;
+    } catch (error) {
+        console.error("Error updating cash:", error);
+        return false;
+    }
+};
+
+export const modifyCash = async (userId: string, amount: number) => {
+    const current = await getCashBalance(userId);
+    const newBalance = current + amount;
+    await updateCashBalance(userId, newBalance);
+    return newBalance;
+};
+
+export const purgeLegacyCashData = async (userId: string) => {
+    try {
+        // 1. Remove from portfolios (ticker US or USD)
+        const qPort = query(collection(db, PORTFOLIO_COLLECTION), where("userId", "==", userId));
+        const snapPort = await getDocs(qPort);
+        const delPort = snapPort.docs
+            .filter(d => ["US", "USD"].includes(d.data().ticker))
+            .map(d => deleteDoc(d.ref));
+
+        // 2. Remove from realized_pnl (ticker US or USD)
+        const qReal = query(collection(db, REALIZED_PNL_COLLECTION), where("userId", "==", userId));
+        const snapReal = await getDocs(qReal);
+        const delReal = snapReal.docs
+            .filter(d => ["US", "USD"].includes(d.data().ticker))
+            .map(d => deleteDoc(d.ref));
+
+        // 3. Clear new cash_history
+        const qCashHist = query(collection(db, CASH_HISTORY_COLLECTION), where("userId", "==", userId));
+        const snapCashHist = await getDocs(qCashHist);
+        const delCashHist = snapCashHist.docs.map(d => deleteDoc(d.ref));
+
+        // 4. Reset balance to 0
+        await updateCashBalance(userId, 0);
+
+        await Promise.all([...delPort, ...delReal, ...delCashHist]);
+        return true;
+    } catch (error) {
+        console.error("Error purging legacy cash data:", error);
+        return false;
     }
 };

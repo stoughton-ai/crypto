@@ -1,0 +1,40 @@
+
+> crypto-analyst@0.1.0 lint
+> eslint
+
+
+/Users/chris/Antigravity/Semaphore10/src/app/actions.ts
+  314:14  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  315:16  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  427:14  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  428:16  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/Users/chris/Antigravity/Semaphore10/src/app/api/cron/monitor/route.ts
+  73:17  error  'analysisResults' is never reassigned. Use 'const' instead  prefer-const
+
+/Users/chris/Antigravity/Semaphore10/src/app/page.tsx
+   194:6   warning  React Hook useEffect has missing dependencies: 'loadLibrary', 'loadPortfolio', 'loadPortfolioHistory', 'loadRealizedTrades', and 'loadVirtualPortfolio'. Either include them or remove the dependency array                                                                              react-hooks/exhaustive-deps
+   211:6   warning  React Hook useEffect has missing dependencies: 'lastLoggedValue', 'loadPortfolioHistory', 'portfolioItems', 'portfolioPrices', and 'user'. Either include them or remove the dependency array                                                                                            react-hooks/exhaustive-deps
+   257:6   warning  React Hook useEffect has missing dependencies: 'loadVirtualPortfolio', 'updatePortfolioPrices', and 'vpData'. Either include them or remove the dependency array                                                                                                                         react-hooks/exhaustive-deps
+   257:30  warning  React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked                                                                                                                                                 react-hooks/exhaustive-deps
+  1247:33  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  1313:33  error    `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                          react/no-unescaped-entities
+  1313:48  error    `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                          react/no-unescaped-entities
+  2357:27  error    `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                          react/no-unescaped-entities
+  2357:42  error    `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                          react/no-unescaped-entities
+  2587:17  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/Users/chris/Antigravity/Semaphore10/src/components/MonitoringStatus.tsx
+  50:17  error  'queue' is never reassigned. Use 'const' instead  prefer-const
+
+/Users/chris/Antigravity/Semaphore10/src/components/PortfolioConsultationModal.tsx
+  43:8   warning  React Hook useEffect has missing dependencies: 'allTickers' and 'startConsultation'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  53:17  error    'verifiedPrices' is never reassigned. Use 'const' instead                                                                                prefer-const
+  60:17  error    'queue' is never reassigned. Use 'const' instead                                                                                         prefer-const
+
+/Users/chris/Antigravity/Semaphore10/src/lib/library.ts
+  36:9  error  'reports' is never reassigned. Use 'const' instead  prefer-const
+
+✖ 20 problems (13 errors, 7 warnings)
+  5 errors and 0 warnings potentially fixable with the `--fix` option.
+
