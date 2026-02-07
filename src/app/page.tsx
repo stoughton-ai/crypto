@@ -1113,13 +1113,6 @@ export default function Home() {
                     <Sparkles size={14} /> AI Agent
                   </button>
                   <button
-                    onClick={() => setIsTargetsModalOpen(true)}
-                    className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all border border-white/5"
-                    title="Manage Target Assets"
-                  >
-                    <Target size={18} />
-                  </button>
-                  <button
                     onClick={() => setIsPortfolioOpen(false)}
                     className="p-2 hover:bg-white/5 rounded-full text-slate-400 transition-colors"
                   >
@@ -2078,17 +2071,33 @@ export default function Home() {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setIsAIAgentPanelOpen(false)}
-                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
-                >
-                  <X size={20} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsTargetsModalOpen(true)}
+                    className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all border border-white/5"
+                    title="Manage Target Assets"
+                  >
+                    <Target size={18} />
+                  </button>
+                  <button
+                    onClick={() => setIsAIAgentPanelOpen(false)}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col min-h-0 overflow-y-auto pr-1">
                 {!vpData ? (
-                  <div className="text-center p-8 border border-dashed border-slate-700 rounded-3xl">
+                  <div className="text-center p-8 border border-dashed border-slate-700 rounded-3xl relative">
+                    <button
+                      onClick={() => setIsTargetsModalOpen(true)}
+                      className="absolute top-4 right-4 p-2 rounded-lg bg-white/5 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all border border-white/5 active:scale-95"
+                      title="Configure Target Assets"
+                    >
+                      <Settings size={16} />
+                    </button>
                     <div className="w-16 h-16 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/20">
                       <Sparkles className="text-white" size={32} />
                     </div>
@@ -2096,13 +2105,21 @@ export default function Home() {
                     <p className="text-slate-400 text-sm mb-6">
                       Let the AI manage a virtual portfolio starting with your chosen amount. It will trade autonomously based on its own market analysis signals.
                     </p>
-                    <button
-                      onClick={handleInitAIChallenge}
-                      disabled={isInitializingVP}
-                      className="bg-white text-slate-900 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
-                    >
-                      {isInitializingVP ? "Initializing..." : "Start AI Challenge"}
-                    </button>
+                    <div className="flex flex-col gap-3">
+                      <button
+                        onClick={handleInitAIChallenge}
+                        disabled={isInitializingVP}
+                        className="bg-white text-slate-900 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
+                      >
+                        {isInitializingVP ? "Initializing..." : "Start AI Challenge"}
+                      </button>
+                      <button
+                        onClick={() => setIsTargetsModalOpen(true)}
+                        className="text-[10px] text-violet-400 hover:text-violet-300 font-bold uppercase tracking-widest flex items-center justify-center gap-2"
+                      >
+                        <Target size={12} /> Configure Target Assets
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <>
