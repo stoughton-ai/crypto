@@ -165,6 +165,7 @@ export async function getRealTimePrice(ticker: string) {
       } else {
         // Source 4: CoinCap
         try {
+          console.log(`[Pricing] Trying CoinCap fallback for ${tickerUpper} (ID: ${cgIdUsed})`);
           const capRes = await fetch(`https://api.coincap.io/v2/assets/${cgIdUsed}`, {
             headers: COMMON_HEADERS,
             next: { revalidate: 0 },
@@ -176,13 +177,21 @@ export async function getRealTimePrice(ticker: string) {
               finalPrice = parseFloat(capData.data.priceUsd);
               verificationStatus = "CoinCap (Fallback)";
               change24h = parseFloat(capData.data.changePercent24Hr) || 0;
+              console.log(`[Pricing] CoinCap Success for ${tickerUpper}: $${finalPrice}`);
             }
+          } else {
+            console.warn(`[Pricing] CoinCap returned ${capRes.status} for ${tickerUpper}`);
           }
-        } catch (e) { }
+        } catch (e) {
+          console.warn(`[Pricing] CoinCap Error for ${tickerUpper}:`, e);
+        }
       }
     }
 
-    if (finalPrice === 0) return null;
+    if (finalPrice === 0) {
+      console.warn(`[Pricing] All sources failed for ${tickerUpper}. Verification Status: ${verificationStatus}`);
+      return null;
+    }
 
     // Optimization: Only fetch averages if we have a valid ID and aren't hitting rate limits hard
     const averages = (verificationStatus.includes("CoinGecko")) ? await fetchAverages(cgIdUsed) : { avg7d: 0, avg30d: 0 };
@@ -335,7 +344,7 @@ async function enforceLibraryLimit(userId: string) {
     const docs = snap.docs.map(d => ({ id: d.id, t: d.data().createdAt?.toDate?.().getTime() || 0 }));
     docs.sort((a, b) => a.t - b.t);
     const batch = adminDb.batch();
-    docs.slice(0, docs.length - 500).forEach(d => batch.delete(adminDb.collection('intel_reports').doc(d.id)));
+    docs.slice(0, docs.length - 500).forEach(d => batch.delete(adminDb!.collection('intel_reports').doc(d.id)));
     await batch.commit();
   } catch { }
 }
