@@ -6,9 +6,8 @@ import { doc, onSnapshot } from "firebase/firestore";
 import { Activity, RefreshCw, Zap } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { clsx } from "clsx";
-import { manualAgentCheck } from "@/app/actions";
+import { manualAgentAnalyzeSingle, manualAgentExecuteTrades } from "@/app/actions";
 import { getLatestScores } from "@/services/libraryService";
-import { AGENT_WATCHLIST } from "@/lib/constants";
 
 interface ManualCheckButtonProps {
     userId: string;
@@ -34,15 +33,6 @@ function ManualCheckButton({ userId, watchlist, setScores }: ManualCheckButtonPr
         setProgress(initProgress);
 
         try {
-            // Queue-based Retry System
-            // We create a queue of items to process.
-            // If an item fails, we check its retry count. If < 15, verify if we should try immediately or cycle.
-            // User request: "try 5 times, if no success move onto next, cycle until all verify or hit 15 tries"
-
-            // To achieve "try 5 times then move next", we can just use a local retry counter.
-            // But the user probably means "don't block the whole queue on one stubborn asset".
-            // So: Attempt 1..5 sequentially. If fail, push to back of queue.
-
             interface WorkItem {
                 ticker: string;
                 attempts: number;
@@ -51,15 +41,14 @@ function ManualCheckButton({ userId, watchlist, setScores }: ManualCheckButtonPr
             const queue: WorkItem[] = watchlist.map(t => ({ ticker: t, attempts: 0 }));
             let successCount = 0;
             const MAX_TOTAL_RETRIES = 15;
-            const BURST_ATTEMPTS = 5; // How many tries before rotating to next asset
+            const BURST_ATTEMPTS = 3; // Lower burst to cycle more often
 
             while (queue.length > 0) {
-                const item = queue.shift(); // Get first item
+                const item = queue.shift();
                 if (!item) break;
 
                 const { ticker } = item;
 
-                // If we've hit absolute max, mark failed and continue
                 if (item.attempts >= MAX_TOTAL_RETRIES) {
                     setProgress(prev => ({ ...prev, [ticker]: 'failed' }));
                     setLogs(prev => [...prev, `✗ ${ticker}: Failed after ${item.attempts} attempts.`]);
@@ -67,55 +56,54 @@ function ManualCheckButton({ userId, watchlist, setScores }: ManualCheckButtonPr
                 }
 
                 setProgress(prev => ({ ...prev, [ticker]: 'analyzing' }));
-                setLogs(prev => [...prev, `Analyzing ${ticker} (Attempt ${item.attempts + 1}/${MAX_TOTAL_RETRIES})...`]);
+                setLogs(prev => [...prev, `Analyzing ${ticker} (Retry ${item.attempts + 1}/${MAX_TOTAL_RETRIES})...`]);
 
                 try {
-                    // Try to analyze single
                     const res = await manualAgentAnalyzeSingle(userId, ticker);
 
-                    if (res.success) {
+                    if (res && res.success) {
                         setProgress(prev => ({ ...prev, [ticker]: 'completed' }));
                         setLogs(prev => [...prev, `✓ ${ticker}: Verified (Score ${res.score})`]);
                         successCount++;
-                        await new Promise(r => setTimeout(r, 2000));
+                        // Increased delay to 3s to stay well within Gemini 15 RPM limit
+                        await new Promise(r => setTimeout(r, 4000));
                     } else {
-                        setLogs(prev => [...prev, `⚠ ${ticker}: ${res.message || 'Verification Failed'}`]);
+                        const errMsg = res?.message || 'Verification Failed';
+                        setLogs(prev => [...prev, `⚠ ${ticker}: ${errMsg}`]);
                         item.attempts++;
 
-                        // Logic: "Trays 5 times, if no success moves on"
-                        // This implies we should keep it at the front of the queue if attempts % 5 != 0?
-                        // Or simply: If attempts < 5, unshift (try again immediately).
-                        // If attempts == 5 (or 10), push (move to back of queue).
-
                         if (item.attempts % BURST_ATTEMPTS !== 0) {
-                            // Keep trying immediately (stay at front)
                             queue.unshift(item);
-                            // Brief pause to not hammer API too hard in immediate loop
-                            await new Promise(r => setTimeout(r, 3000));
+                            await new Promise(r => setTimeout(r, 5000));
                         } else {
-                            // Rotate to back of queue
                             setLogs(prev => [...prev, `⚠ ${ticker}: Cycling to next asset...`]);
                             queue.push(item);
+                            await new Promise(r => setTimeout(r, 2000));
                         }
                     }
-                } catch (err) {
+                } catch (err: any) {
                     console.error(err);
+                    setLogs(prev => [...prev, `⚠ ${ticker}: Network/System Error`]);
                     item.attempts++;
-                    queue.push(item); // Rotate on error
+                    queue.push(item);
+                    await new Promise(r => setTimeout(r, 5000));
                 }
             }
 
             if (successCount > 0) {
                 setLogs(prev => [...prev, "Executing Strategy & Rebalancing Portfolio..."]);
-                await manualAgentExecuteTrades(userId);
+                const tradeRes = await manualAgentExecuteTrades(userId);
 
-                // FORCE REFRESH OF SCORES
+                if (tradeRes && tradeRes.success) {
+                    setLogs(prev => [...prev, "✓ Strategy Execution Complete"]);
+                } else {
+                    setLogs(prev => [...prev, `⚠ Trade Execution: ${tradeRes?.message || 'Failed'}`]);
+                }
+
                 setLogs(prev => [...prev, "Refreshing Dashboard..."]);
                 await getLatestScores(userId).then(setScores);
-
-                setLogs(prev => [...prev, "✓ Strategy Execution Complete"]);
             } else {
-                setLogs(prev => [...prev, "⚠ No valid data to trade on."]);
+                setLogs(prev => [...prev, "⚠ No valid data to trade on. Check API limits."]);
             }
 
         } catch (e) {
@@ -151,7 +139,7 @@ function ManualCheckButton({ userId, watchlist, setScores }: ManualCheckButtonPr
                             )}
                         </div>
 
-                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
+                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2 text-slate-300">
                             <div className="grid grid-cols-1 gap-2">
                                 {watchlist.map(ticker => (
                                     <div key={ticker} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
@@ -189,11 +177,6 @@ function ManualCheckButton({ userId, watchlist, setScores }: ManualCheckButtonPr
     );
 }
 
-// Stub for import, actual import needs to happen or these actions need to be available.
-// Since we are editing MonitoringStatus.tsx, we need these new actions in actions.ts first or imported.
-// I will assume I will add them to actions.ts shortly.
-import { manualAgentAnalyzeSingle, manualAgentExecuteTrades } from "@/app/actions";
-
 export default function MonitoringStatus({ watchlist = [] }: { watchlist?: string[] }) {
     const { user } = useAuth();
     const [lastResearch, setLastResearch] = useState<string | null>(null);
@@ -206,12 +189,10 @@ export default function MonitoringStatus({ watchlist = [] }: { watchlist?: strin
             if (snap.exists()) {
                 const val = snap.data().lastUpdated;
                 setLastResearch(val);
-                // Trigger score refresh when timestamp updates
                 getLatestScores(user.uid).then(setScores);
             }
         });
 
-        // Initial fetch
         getLatestScores(user.uid).then(setScores);
 
         return () => {
