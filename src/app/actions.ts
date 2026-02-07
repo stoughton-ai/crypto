@@ -159,12 +159,28 @@ export async function getRealTimePrice(ticker: string) {
     } else {
       const krakenPrice = await fetchKrakenPrice(tickerUpper);
       if (krakenPrice) {
-        finalPrice = krakenPrice;
+        finalPrice = (krakenPrice);
         verificationStatus = "Kraken";
       } else {
-        return null;
+        // Source 4: CoinCap (Fallback for rate limits)
+        try {
+          const capRes = await fetch(`https://api.coincap.io/v2/assets/${id || ticker.toLowerCase()}`);
+          if (capRes.ok) {
+            const capData = await capRes.json();
+            if (capData.data?.priceUsd) {
+              finalPrice = parseFloat(capData.data.priceUsd);
+              verificationStatus = "CoinCap (Fallback)";
+              change24h = parseFloat(capData.data.changePercent24Hr) || 0;
+              mcap = parseFloat(capData.data.marketCapUsd) || 0;
+            }
+          }
+        } catch (e) {
+          console.warn("CoinCap fallback failed", e);
+        }
       }
     }
+
+    if (finalPrice === 0) return null;
 
     const idForAverages = id || ticker.toLowerCase();
     const avg7d = await fetchAveragePrice(idForAverages, 7);
@@ -510,8 +526,15 @@ export async function manualAgentAnalyzeSingle(userId: string, ticker: string) {
 
       const analysis = await analyzeCrypto(ticker, historyContext);
 
-      if (!analysis.verificationStatus.toLowerCase().includes("research")) {
-        // SAVE REPORT TO LIBRARY
+      if (analysis.verificationStatus.toLowerCase().includes("research") || analysis.currentPrice === 0) {
+        if (attempt === MAX_RETRIES) {
+          return { success: false, message: `Price Verification Failed (${analysis.verificationStatus})` };
+        }
+        continue;
+      }
+
+      // ONLY SAVE IF VERIFIED & PRICE > 0
+      try {
         await adminDb.collection('intel_reports').add({
           ...analysis,
           userId: userId,
@@ -530,14 +553,10 @@ export async function manualAgentAnalyzeSingle(userId: string, ticker: string) {
           verificationStatus: analysis.verificationStatus,
           fullAnalysis: analysis
         };
+      } catch (e) {
+        console.error("Failed to save report to library", e);
+        return { success: false, message: "Database Save Error" };
       }
-
-      // If it's research only, we might want to retry as well if we suspect it missed real-time data?
-      // For now, treat it as a failure for trading purposes.
-      if (attempt === MAX_RETRIES) {
-        return { success: false, message: "Verification failed (Research only)" };
-      }
-
     } catch (e) {
       console.warn(`Analysis attempt ${attempt + 1} failed for ${ticker}:`, e);
       if (attempt === MAX_RETRIES) {
@@ -563,12 +582,6 @@ export async function manualAgentExecuteTrades(userId: string, initialBalance: n
 
     for (const ticker of targets) {
       const reportsRef = adminDb.collection('intel_reports');
-      // REMOVED orderBy/limit to avoid missing index errors.
-      // Fetching by equality clauses is safe with default indexes.
-      // We might get many docs, so maybe we should try to limit if possible? 
-      // Firestore doesn't support limit without order if you want the "latest".
-      // But we can filter by `savedAt` string if it's ISO? No, lexicographical sort might not correspond exactly to time if not careful.
-      // Best approach: Just fetch. If it gets too large, we'll need an index. For now, it's safer to fetch.
       const snapshot = await reportsRef
         .where('userId', '==', userId)
         .where('ticker', '==', ticker.toUpperCase())
@@ -660,7 +673,6 @@ async function fetchHistoricalContext(userId: string, ticker: string): Promise<s
     return "";
   }
 }
-
 
 export async function resetAIChallenge(userId: string, initialAmount: number = 600) {
   try {

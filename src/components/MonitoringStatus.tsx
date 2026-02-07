@@ -77,9 +77,9 @@ function ManualCheckButton({ userId, watchlist, setScores }: ManualCheckButtonPr
                         setProgress(prev => ({ ...prev, [ticker]: 'completed' }));
                         setLogs(prev => [...prev, `✓ ${ticker}: Verified (Score ${res.score})`]);
                         successCount++;
+                        await new Promise(r => setTimeout(r, 2000));
                     } else {
-                        // Analysis Failed or Unverified
-                        // Update attempts
+                        setLogs(prev => [...prev, `⚠ ${ticker}: ${res.message || 'Verification Failed'}`]);
                         item.attempts++;
 
                         // Logic: "Trays 5 times, if no success moves on"
@@ -91,7 +91,7 @@ function ManualCheckButton({ userId, watchlist, setScores }: ManualCheckButtonPr
                             // Keep trying immediately (stay at front)
                             queue.unshift(item);
                             // Brief pause to not hammer API too hard in immediate loop
-                            await new Promise(r => setTimeout(r, 2000));
+                            await new Promise(r => setTimeout(r, 3000));
                         } else {
                             // Rotate to back of queue
                             setLogs(prev => [...prev, `⚠ ${ticker}: Cycling to next asset...`]);
