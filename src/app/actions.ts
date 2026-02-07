@@ -188,6 +188,28 @@ export async function getRealTimePrice(ticker: string) {
       }
     }
 
+    // Source 5: CryptoCompare (High Availability Fallback)
+    if (finalPrice === 0) {
+      try {
+        console.log(`[Pricing] Trying CryptoCompare for ${tickerUpper}`);
+        const ccRes = await fetch(`https://min-api.cryptocompare.com/data/price?fsym=${tickerUpper}&tsyms=USD`, {
+          headers: COMMON_HEADERS,
+          next: { revalidate: 0 },
+          cache: 'no-store'
+        });
+        if (ccRes.ok) {
+          const ccData = await ccRes.json();
+          if (ccData.USD) {
+            finalPrice = parseFloat(ccData.USD);
+            verificationStatus = "CryptoCompare (Fallback)";
+            console.log(`[Pricing] CryptoCompare Success for ${tickerUpper}: $${finalPrice}`);
+          }
+        }
+      } catch (e) {
+        console.warn(`[Pricing] CryptoCompare Error for ${tickerUpper}:`, e);
+      }
+    }
+
     if (finalPrice === 0) {
       console.warn(`[Pricing] All sources failed for ${tickerUpper}. Verification Status: ${verificationStatus}`);
       return null;
