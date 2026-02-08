@@ -45,14 +45,6 @@ export interface CryptoAnalysisResult {
   name: string;
   currentPrice: number;
   priceChange24h: number;
-  price7dAvg: number;
-  price30dAvg: number;
-  dailyHigh: number;
-  dailyLow: number;
-  allTimeHigh: number;
-  athDate: string;
-  allTimeLow: number;
-  atlDate: string;
   marketCap: number;
   verificationStatus: string;
   trafficLight: "RED" | "AMBER" | "GREEN";

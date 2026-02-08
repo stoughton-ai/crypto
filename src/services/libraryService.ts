@@ -58,8 +58,12 @@ export const fetchLibrary = async (userId: string) => {
         } as LibraryReport));
 
         return reports;
-    } catch (error) {
-        console.error("Error fetching library (Primary):", error);
+    } catch (error: any) {
+        if (error.message?.includes("building")) {
+            console.warn("Intelligence index is currently building. Using temporary client-side sort.");
+        } else {
+            console.error("Library fetch failed, using fallback:", error.message || error);
+        }
 
         // Fallback: If Sorted Query fails (likely missing index), try basic query + client-side sort
         try {
@@ -97,16 +101,18 @@ export const migrateLegacyLibrary = async (userId: string, legacyReports: any[])
     const results = [];
     for (const report of legacyReports) {
         try {
-            // Check if already exists to prevent duplicates (optional but good)
+            // Basic query to avoid composite index requirements
             const q = query(
                 collection(db, LIBRARY_COLLECTION),
                 where("userId", "==", userId),
-                where("ticker", "==", report.ticker),
-                where("savedAt", "==", report.savedAt)
+                where("ticker", "==", report.ticker)
             );
             const snapshot = await getDocs(q);
 
-            if (snapshot.empty) {
+            // Check for match on the client
+            const alreadyExists = snapshot.docs.some(d => d.data().savedAt === report.savedAt);
+
+            if (!alreadyExists) {
                 const docId = await saveToLibrary(userId, report);
                 results.push(docId);
             }

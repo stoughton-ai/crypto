@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, getVerifiedPrices, getAgentConsultation, getRealTimePrice, getAgentTargets, updateAgentTargets } from "./actions"; // Added getAgentConsultation
+import { manualAgentCheck, resetAIChallenge, analyzeCrypto, getLegacyReports, deleteLegacyFile, getSimplePrices, getVerifiedPrices, getAgentConsultation, getRealTimePrice, clearDecisions } from "./actions"; // Added getAgentConsultation
 import { AGENT_WATCHLIST } from "@/lib/constants";
 import { type CryptoAnalysisResult } from "@/lib/gemini";
 import { useAuth } from "@/context/AuthContext";
@@ -9,11 +9,11 @@ import { type AgentConsultationResult } from "@/lib/agent";
 import { fetchLibrary, saveToLibrary, deleteReport, migrateLegacyLibrary, clearLibrary, type LibraryReport } from "@/services/libraryService";
 import { fetchPortfolio, addToPortfolio, removeFromPortfolio, updatePortfolioItem, recordPortfolioSnapshot, fetchPortfolioHistory, clearPortfolio, recordTrade, fetchRealizedTrades, getCashBalance, modifyCash, recordCashTransaction, purgeLegacyCashData, type PortfolioItem, type PortfolioSnapshot, type RealizedTrade, type TransactionHistoryItem } from "@/services/portfolioService";
 import { getVirtualPortfolio, getVirtualTrades, getVirtualHistory, getVirtualDecisions, type VirtualPortfolio, type VirtualTrade, type VirtualDecision } from "@/services/virtualPortfolioService";
-import { manualAgentCheck, resetAIChallenge } from "./actions";
+import { resetAgentTimeline } from "@/services/agentConfigService";
 import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from "recharts";
 import { Search, Info, TrendingUp, ShieldCheck, Activity, Users, Github, Wallet, BarChart3, AlertCircle, Loader2, Library, Trash2, X, ChevronLeft, ChevronRight, Briefcase, Plus, TrendingDown, ArrowUpRight, ArrowDownRight, Coins, RefreshCw, Edit, Minus, DollarSign, Sparkles, PackageSearch, Settings, Check, Target } from "lucide-react";
-import MonitoringStatus from "@/components/MonitoringStatus";
 import PortfolioConsultationModal from "@/components/PortfolioConsultationModal";
+import AgentDashboard from "@/components/AgentDashboard";
 
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -34,7 +34,14 @@ const formatPrice = (price: number) => {
 };
 
 export default function Home() {
-  const { user, loading: authLoading, signInWithGoogle, logout } = useAuth();
+  const { user, loading: authLoading, signInWithGoogle, logout, authError, clearAuthError } = useAuth();
+
+  useEffect(() => {
+    if (authError) {
+      showModalAlert("Authentication Error", authError);
+      clearAuthError();
+    }
+  }, [authError]);
   const [ticker, setTicker] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CryptoAnalysisResult | null>(null);
@@ -62,6 +69,26 @@ export default function Home() {
   const [isAIAgentPanelOpen, setIsAIAgentPanelOpen] = useState(false);
 
   const [modalInput, setModalInput] = useState("");
+
+  const showModalAlert = (title: string, message: string) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      type: 'alert'
+    });
+  };
+
+  const showModalConfirm = (title: string, message: string, onConfirm: (val?: string) => void, isDanger: boolean = false) => {
+    setModalInput("");
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      type: isDanger ? 'danger' : 'confirm',
+      onConfirm
+    });
+  };
 
   // Portfolio State
   const [isPortfolioOpen, setIsPortfolioOpen] = useState(false);
@@ -100,6 +127,9 @@ export default function Home() {
   const [isPerformanceChartOpen, setIsPerformanceChartOpen] = useState(false);
   const [isTradesModalOpen, setIsTradesModalOpen] = useState(false);
   const [tradeLogPage, setTradeLogPage] = useState(1);
+  const [isDecisionsModalOpen, setIsDecisionsModalOpen] = useState(false);
+  const [decisionLogPage, setDecisionLogPage] = useState(1);
+  const [isVpHoldingsModalOpen, setIsVpHoldingsModalOpen] = useState(false);
 
   // Agent State
   const [isAgentOpen, setIsAgentOpen] = useState(false);
@@ -113,9 +143,6 @@ export default function Home() {
   const [isMobile, setIsMobile] = useState(false);
   const [showSuccess, setShowSuccess] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState<{ currentTicker: string; index: number; total: number } | null>(null);
-  const [agentTargets, setAgentTargets] = useState<string[]>([]);
-  const [isTargetsModalOpen, setIsTargetsModalOpen] = useState(false);
-  const [newTargetTicker, setNewTargetTicker] = useState("");
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
@@ -192,7 +219,7 @@ export default function Home() {
       loadPortfolioHistory();
       loadRealizedTrades();
       loadVirtualPortfolio();
-      loadAgentTargets();
+      loadVirtualPortfolio();
     }
   }, [user]);
 
@@ -344,8 +371,6 @@ export default function Home() {
                 price: priceData.price,
                 source: priceData.verificationStatus,
                 timestamp: Date.now(),
-                high24h: priceData.high24h,
-                low24h: priceData.low24h,
                 change24h: priceData.change24h
               };
             }
@@ -390,49 +415,6 @@ export default function Home() {
     }
   };
 
-  const loadAgentTargets = async () => {
-    if (!user) return;
-    const targets = await getAgentTargets(user.uid);
-    setAgentTargets(targets);
-  };
-
-  const handleUpdateTargets = async (newTargets: string[]) => {
-    if (!user) return;
-    const res = await updateAgentTargets(user.uid, newTargets);
-    if (res.success) {
-      setAgentTargets(res.targets || newTargets);
-      setShowSuccess("Targets Updated");
-      setTimeout(() => setShowSuccess(null), 2000);
-    } else {
-      setModalConfig({
-        isOpen: true,
-        title: "Update Failed",
-        message: res.message || "Failed to update targets.",
-        type: 'danger'
-      });
-    }
-  };
-
-  const handleAddTarget = () => {
-    if (!newTargetTicker) return;
-    const ticker = newTargetTicker.toUpperCase().trim();
-    if (agentTargets.includes(ticker)) {
-      setModalConfig({ isOpen: true, title: "Duplicate", message: "Ticker already in targets.", type: 'alert' });
-      return;
-    }
-    if (agentTargets.length >= 15) {
-      setModalConfig({ isOpen: true, title: "Limit Reached", message: "Maximum 15 targets allowed.", type: 'alert' });
-      return;
-    }
-    const updated = [...agentTargets, ticker];
-    handleUpdateTargets(updated);
-    setNewTargetTicker("");
-  };
-
-  const handleRemoveTarget = (ticker: string) => {
-    const updated = agentTargets.filter(t => t !== ticker);
-    handleUpdateTargets(updated);
-  };
 
   const handleInitAIChallenge = async () => {
     if (!user) return;
@@ -514,6 +496,24 @@ export default function Home() {
     });
   };
 
+  const handleClearDecisions = async () => {
+    if (!user) return;
+    showModalConfirm(
+      "Clear Decision Logs",
+      "Are you sure you want to delete all AI reasoning and decision logs? This cannot be undone.",
+      async () => {
+        const res = await clearDecisions(user.uid);
+        if (res.success) {
+          setVpDecisions([]);
+          showModalAlert("Logs Cleared", "AI decision logic history has been deleted.");
+        } else {
+          showModalAlert("Error", "Failed to clear decision logs.");
+        }
+      },
+      true // isDanger
+    );
+  };
+
   const updatePortfolioPrices = async () => {
     const tickers = portfolioItems.map(item => item.ticker);
     if (tickers.length === 0) return;
@@ -552,16 +552,37 @@ export default function Home() {
 
   const handleResetCash = async () => {
     if (!user) return;
-    if (window.confirm("This will permanently delete all legacy 'US/USD' ticker entries and reset your cash wallet history to zero. This cannot be undone. Proceed?")) {
-      const success = await purgeLegacyCashData(user.uid);
-      if (success) {
-        alert("Wallet reset successfully.");
-        loadPortfolio();
-        loadRealizedTrades();
-      } else {
-        alert("Failed to reset wallet.");
+    showModalConfirm(
+      "Confirm Wallet Reset",
+      "This will permanently delete all legacy 'US/USD' ticker entries and reset your cash wallet history to zero. This cannot be undone. Proceed?",
+      async () => {
+        const success = await purgeLegacyCashData(user.uid);
+        if (success) {
+          showModalAlert("Reset Complete", "Wallet reset successfully.");
+          loadPortfolio();
+          loadRealizedTrades();
+        } else {
+          showModalAlert("Reset Failed", "Failed to reset wallet.");
+        }
+      },
+      true
+    );
+  };
+
+  const handleResetAgentTimeline = async () => {
+    if (!user) return;
+    showModalConfirm(
+      "Reset AI Timeline",
+      "This will allow standard tokens to be analyzed again immediately. Continue?",
+      async () => {
+        try {
+          await resetAgentTimeline(user.uid);
+          showModalAlert("Timeline Reset", "AI timeline reset successfully.");
+        } catch (e) {
+          showModalAlert("Reset Error", "Failed to reset AI timeline.");
+        }
       }
-    }
+    );
   };
 
   const handleSaveAsset = async (e: React.FormEvent) => {
@@ -757,24 +778,31 @@ export default function Home() {
 
       // 2. Analyze via server action
       const data = await analyzeCrypto(ticker, historyContextString);
+
+      if (!data) {
+        throw new Error("No analysis data returned from server.");
+      }
+
       setResult(data);
 
       // Check if data is research-based (fallback)
-      if (data.verificationStatus.toLowerCase().includes("research")) {
+      if (data.verificationStatus && data.verificationStatus.toLowerCase().includes("research")) {
         setRetryCountdown(5);
       } else {
         // Real data confirmed
         setRetryCountdown(null);
         // 3. Save to Firestore (Client-side)
-        await saveToLibrary(user.uid, data);
-        loadLibrary(); // Refresh library after new save
+        if (user) {
+          await saveToLibrary(user.uid, data);
+          loadLibrary(); // Refresh library after new save
+        }
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Search Error:", err);
       setModalConfig({
         isOpen: true,
         title: "Analysis Failed",
-        message: err instanceof Error ? err.message : "An unexpected network error occurred.",
+        message: err.message || "An unexpected network error occurred.",
         type: "alert"
       });
       setRetryCountdown(null);
@@ -832,8 +860,6 @@ export default function Home() {
             price: priceData.price,
             source: priceData.verificationStatus,
             timestamp: Date.now(),
-            high24h: priceData.high24h,
-            low24h: priceData.low24h,
             change24h: priceData.change24h
           };
         }
@@ -1177,13 +1203,7 @@ export default function Home() {
                     </div>
                   ) : vpData === null ? (
                     <div className="text-center p-8 border border-dashed border-slate-700 rounded-3xl relative">
-                      <button
-                        onClick={() => setIsTargetsModalOpen(true)}
-                        className="absolute top-4 right-4 p-2 rounded-lg bg-white/5 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all border border-white/5 active:scale-95"
-                        title="Configure Target Assets"
-                      >
-                        <Settings size={16} />
-                      </button>
+
                       <div className="w-16 h-16 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/20">
                         <Sparkles className="text-white" size={32} />
                       </div>
@@ -1199,12 +1219,7 @@ export default function Home() {
                         >
                           {isInitializingVP ? "Initializing..." : "Start AI Challenge"}
                         </button>
-                        <button
-                          onClick={() => setIsTargetsModalOpen(true)}
-                          className="text-[10px] text-violet-400 hover:text-violet-300 font-bold uppercase tracking-widest flex items-center justify-center gap-2"
-                        >
-                          <Target size={12} /> Configure Target Assets
-                        </button>
+
                       </div>
                     </div>
                   ) : (
@@ -1217,13 +1232,7 @@ export default function Home() {
                         <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
 
                         <div className="absolute top-4 right-4 flex items-center gap-5">
-                          <button
-                            onClick={() => setIsTargetsModalOpen(true)}
-                            className="p-3 rounded-xl bg-slate-900/60 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all shadow-lg border border-white/5 active:scale-90"
-                            title="Manage Target Assets"
-                          >
-                            <Settings size={18} />
-                          </button>
+
                           <button
                             onClick={loadVirtualPortfolio}
                             className="p-3 rounded-xl bg-slate-900/60 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all shadow-lg border border-white/5 active:scale-90"
@@ -1283,11 +1292,6 @@ export default function Home() {
                             </span>
                           </div>
                         )}
-                      </div>
-
-                      {/* Monitoring & Research Status */}
-                      <div className="mb-8">
-                        <MonitoringStatus watchlist={agentTargets} />
                       </div>
 
                       {/* AI History Chart */}
@@ -1528,29 +1532,7 @@ export default function Home() {
                         <p className="text-[10px] text-slate-500 mt-1">{realizedTrades.length} Closed Trades</p>
                       </div>
 
-                      {/* Cost Basis */}
-                      <div className="glass rounded-[2rem] border-white/5 p-4 relative group col-span-1">
-                        <div className="absolute top-2 right-4 text-slate-500/20 group-hover:text-slate-500/40 transition-colors">
-                          <Wallet size={24} />
-                        </div>
-                        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Active Collateral</p>
-                        <div className="text-lg font-black font-mono text-white">
-                          ${metrics.totalInvested.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </div>
-                        <p className="text-[10px] text-slate-500 mt-1">{metrics.assetCount} Active Assets</p>
-                      </div>
 
-                      {/* Portfolio Diversity Score placeholder or similar */}
-                      <div className="glass rounded-[2rem] border-white/5 p-4 relative group col-span-1 bg-gradient-to-br from-blue-500/5 to-transparent">
-                        <div className="absolute top-2 right-4 text-indigo-500/20 group-hover:text-indigo-500/40 transition-colors">
-                          <ShieldCheck size={24} />
-                        </div>
-                        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">System Health</p>
-                        <div className="text-lg font-black font-mono text-indigo-400">
-                          98.4<span className="text-[10px] ml-1">SEC</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 mt-1">Cross-Verified</p>
-                      </div>
                     </div>
 
                     {/* Best/Worst Performers */}
@@ -2072,13 +2054,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setIsTargetsModalOpen(true)}
-                    className="p-2 rounded-xl bg-white/5 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all border border-white/5"
-                    title="Manage Target Assets"
-                  >
-                    <Target size={18} />
-                  </button>
+
                   <button
                     onClick={() => setIsAIAgentPanelOpen(false)}
                     className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
@@ -2091,13 +2067,7 @@ export default function Home() {
               <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col min-h-0 overflow-y-auto pr-1">
                 {!vpData ? (
                   <div className="text-center p-8 border border-dashed border-slate-700 rounded-3xl relative">
-                    <button
-                      onClick={() => setIsTargetsModalOpen(true)}
-                      className="absolute top-4 right-4 p-2 rounded-lg bg-white/5 text-slate-400 hover:text-violet-400 hover:bg-violet-500/10 transition-all border border-white/5 active:scale-95"
-                      title="Configure Target Assets"
-                    >
-                      <Settings size={16} />
-                    </button>
+
                     <div className="w-16 h-16 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/20">
                       <Sparkles className="text-white" size={32} />
                     </div>
@@ -2113,12 +2083,7 @@ export default function Home() {
                       >
                         {isInitializingVP ? "Initializing..." : "Start AI Challenge"}
                       </button>
-                      <button
-                        onClick={() => setIsTargetsModalOpen(true)}
-                        className="text-[10px] text-violet-400 hover:text-violet-300 font-bold uppercase tracking-widest flex items-center justify-center gap-2"
-                      >
-                        <Target size={12} /> Configure Target Assets
-                      </button>
+
                     </div>
                   </div>
                 ) : (
@@ -2220,10 +2185,7 @@ export default function Home() {
                       )}
                     </div>
 
-                    {/* Monitoring & Research Status */}
-                    <div className="mb-8">
-                      <MonitoringStatus />
-                    </div>
+
 
                     {/* AI History Chart */}
                     {/* AI History Chart Button */}
@@ -2239,6 +2201,17 @@ export default function Home() {
                       </div>
                     )}
 
+                    {/* Current Holdings Button */}
+                    <div className="mb-3">
+                      <button
+                        onClick={() => setIsVpHoldingsModalOpen(true)}
+                        className="w-full py-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-emerald-500/30 transition-all flex items-center justify-center gap-2 group"
+                      >
+                        <Wallet className="text-emerald-400 group-hover:scale-110 transition-transform" size={16} />
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">View AI Holdings</span>
+                      </button>
+                    </div>
+
                     {/* Recent AI Trades Button */}
                     <button
                       onClick={() => { setIsTradesModalOpen(true); setTradeLogPage(1); }}
@@ -2249,56 +2222,15 @@ export default function Home() {
                     </button>
 
 
-                    {/* AI Decision Log */}
-                    <div className="border-t border-white/5 mt-8 mb-6" />
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-                        <Sparkles size={12} /> AI Decision Logic
-                      </h3>
-                      <span className="text-[10px] text-slate-600 font-mono uppercase tracking-widest">Reasoning Engine</span>
-                    </div>
-                    <div className="space-y-3 max-h-64 overflow-y-auto custom-scrollbar pr-2">
-                      {vpDecisions.length === 0 ? (
-                        <div className="text-center py-6 bg-white/[0.02] rounded-2xl border border-dashed border-white/5">
-                          <p className="text-slate-500 text-[10px] italic">No decision records found.</p>
-                        </div>
-                      ) : (
-                        vpDecisions.map((decision) => (
-                          <div key={decision.id || Math.random()} className="flex gap-3 p-3 bg-white/[0.03] rounded-xl border border-white/5 hover:bg-white/[0.05] transition-colors">
-                            <div className={cn(
-                              "w-1 h-auto rounded-full",
-                              decision.action === 'BUY' ? "bg-emerald-500" :
-                                decision.action === 'SELL' ? "bg-red-500" :
-                                  decision.action === 'HOLD' ? "bg-blue-500" : "bg-slate-600"
-                            )} />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between mb-0.5">
-                                <span className="text-xs font-bold text-white flex items-center gap-2">
-                                  {decision.ticker}
-                                  <span className={cn(
-                                    "text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter opacity-80",
-                                    decision.action === 'BUY' ? "bg-emerald-500/20 text-emerald-400" :
-                                      decision.action === 'SELL' ? "bg-red-500/20 text-red-400" :
-                                        decision.action === 'HOLD' ? "bg-blue-500/20 text-blue-400" : "bg-slate-500/20 text-slate-400"
-                                  )}>
-                                    {decision.action}
-                                  </span>
-                                </span>
-                                <span className="text-[9px] text-slate-500 font-mono">
-                                  {new Date(decision.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-slate-400 leading-relaxed truncate group-hover:whitespace-normal group-hover:overflow-visible group-hover:bg-slate-900 group-hover:relative group-hover:z-10 transition-all">
-                                {decision.reason}
-                              </p>
-                              <div className="flex items-center gap-3 mt-1.5">
-                                <span className="text-[9px] text-slate-600 font-bold uppercase">Score: {decision.score}</span>
-                                {decision.price > 0 && <span className="text-[9px] text-slate-600 font-bold uppercase">Price: ${decision.price.toFixed(2)}</span>}
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
+                    {/* AI Decision Log Button */}
+                    <div className="mt-3">
+                      <button
+                        onClick={() => { setIsDecisionsModalOpen(true); setDecisionLogPage(1); }}
+                        className="w-full py-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-sparkle-500/30 transition-all flex items-center justify-center gap-2 group"
+                      >
+                        <Sparkles className="text-amber-400 group-hover:scale-110 transition-transform" size={16} />
+                        <span className="text-xs font-bold text-slate-300 uppercase tracking-widest">View Decision Logic</span>
+                      </button>
                     </div>
 
                     {/* Explicit Reset Button */}
@@ -2502,6 +2434,237 @@ export default function Home() {
           </>
         )}
       </AnimatePresence>
+      <AnimatePresence>
+        {isDecisionsModalOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDecisionsModalOpen(false)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100]"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl px-4 z-[101]"
+            >
+              <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[80vh]">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+
+                <div className="flex items-center justify-between mb-8 relative z-10 shrink-0">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <Sparkles className="text-amber-400" size={24} />
+                      AI Decision Logic
+                    </h2>
+                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Autonomous Reasoning Engine</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleClearDecisions}
+                      className="p-2 hover:bg-red-500/10 rounded-full text-red-400/70 hover:text-red-400 transition-all group relative"
+                      title="Clear All Decision Logs"
+                    >
+                      <Trash2 size={18} />
+                      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-800 text-[10px] text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-white/10">
+                        Clear Logs
+                      </span>
+                    </button>
+                    <button onClick={() => setIsDecisionsModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-400 transition-colors">
+                      <X size={20} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 relative z-10 space-y-4">
+                  {vpDecisions.length === 0 ? (
+                    <div className="text-center py-12 bg-white/[0.02] rounded-3xl border border-dashed border-white/5">
+                      <p className="text-slate-500 text-sm italic">No decisions recorded yet.</p>
+                    </div>
+                  ) : (
+                    vpDecisions.slice((decisionLogPage - 1) * 5, decisionLogPage * 5).map((decision) => (
+                      <div key={decision.id || Math.random()} className="relative group p-4 bg-white/[0.03] rounded-2xl border border-white/5 hover:border-amber-500/20 transition-all">
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs",
+                              decision.action === 'BUY' ? "bg-emerald-500/10 text-emerald-400" :
+                                decision.action === 'SELL' ? "bg-red-500/10 text-red-400" :
+                                  decision.action === 'HOLD' ? "bg-blue-500/10 text-blue-400" : "bg-slate-500/10 text-slate-400"
+                            )}>
+                              {decision.ticker.slice(0, 2)}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white font-bold text-lg">{decision.ticker}</span>
+                                <span className={cn(
+                                  "text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-tighter",
+                                  decision.action === 'BUY' ? "bg-emerald-500/20 text-emerald-400" :
+                                    decision.action === 'SELL' ? "bg-red-500/20 text-red-400" :
+                                      decision.action === 'HOLD' ? "bg-blue-500/20 text-blue-400" : "bg-slate-500/20 text-slate-400"
+                                )}>
+                                  {decision.action}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-500">{new Date(decision.date).toLocaleString([], { dateStyle: 'long', timeStyle: 'short' })}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-black text-white font-mono">Score: {decision.score}</p>
+                            {decision.price > 0 && <p className="text-xs text-slate-500">@{decision.price.toFixed(2)}</p>}
+                          </div>
+                        </div>
+                        <div className="mt-3 text-xs text-slate-400 bg-black/20 p-3 rounded-xl border border-white/5 leading-relaxed">
+                          {decision.reason}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Pagination Controls */}
+                {vpDecisions.length > 5 && (
+                  <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between shrink-0 relative z-10">
+                    <button
+                      disabled={decisionLogPage === 1}
+                      onClick={() => setDecisionLogPage(p => Math.max(1, p - 1))}
+                      className="flex items-center gap-1 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4" /> Prev
+                    </button>
+                    <span className="text-[10px] font-mono text-slate-500">
+                      {decisionLogPage} / {Math.ceil(vpDecisions.length / 5)}
+                    </span>
+                    <button
+                      disabled={decisionLogPage >= Math.ceil(vpDecisions.length / 5)}
+                      onClick={() => setDecisionLogPage(p => p + 1)}
+                      className="flex items-center gap-1 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                    >
+                      Next <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* AI Holdings Modal */}
+      <AnimatePresence>
+        {isVpHoldingsModalOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsVpHoldingsModalOpen(false)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100]"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-3xl px-4 z-[101]"
+            >
+              <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[85vh]">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
+
+                <div className="flex items-center justify-between mb-8 relative z-10 shrink-0">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <Wallet className="text-emerald-400" size={24} />
+                      Current AI Holdings
+                    </h2>
+                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Autonomous Portfolio Status</p>
+                  </div>
+                  <button onClick={() => setIsVpHoldingsModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-400 transition-colors">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Account Summary Stats */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8 shrink-0">
+                  <div className="bg-white/[0.03] border border-white/5 p-4 rounded-2xl">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Cash Balance</div>
+                    <div className="text-lg font-bold text-white font-mono">${vpData?.cashBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                  <div className="bg-white/[0.03] border border-white/5 p-4 rounded-2xl">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Holdings Value</div>
+                    <div className="text-lg font-bold text-white font-mono">${((vpData?.totalValue || 0) - (vpData?.cashBalance || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                  <div className="bg-white/[0.03] border border-white/5 p-4 rounded-2xl">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Total Value</div>
+                    <div className="text-lg font-bold text-blue-400 font-mono">${vpData?.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                  <div className="bg-white/[0.03] border border-white/5 p-4 rounded-2xl">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Account ROI</div>
+                    <div className={cn(
+                      "text-lg font-bold font-mono",
+                      (vpData?.totalValue || 0) >= (vpData?.initialBalance || 600) ? "text-emerald-400" : "text-red-400"
+                    )}>
+                      {(((vpData?.totalValue || 0) - (vpData?.initialBalance || 600)) / (vpData?.initialBalance || 600) * 100).toFixed(2)}%
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 relative z-10">
+                  {!vpData || Object.keys(vpData.holdings).length === 0 ? (
+                    <div className="text-center py-12 bg-white/[0.02] rounded-3xl border border-dashed border-white/5">
+                      <p className="text-slate-500 text-sm italic">No active holdings. The AI is currently 100% in cash.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {Object.entries(vpData.holdings).map(([ticker, holding]) => {
+                        const currentPrice = vpPrices[ticker]?.price || holding.averagePrice;
+                        const pnl = ((currentPrice - holding.averagePrice) / holding.averagePrice) * 100;
+                        const value = holding.amount * currentPrice;
+
+                        return (
+                          <div key={ticker} className="p-4 bg-white/[0.03] rounded-2xl border border-white/5 hover:border-emerald-500/20 transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center font-bold text-lg text-white">
+                                {ticker.slice(0, 2)}
+                              </div>
+                              <div>
+                                <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                                  {ticker}
+                                </h4>
+                                <p className="text-xs text-slate-500">{holding.amount.toLocaleString()} Units @ ${holding.averagePrice.toFixed(4)}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-row sm:flex-col justify-between items-end w-full sm:w-auto mt-2 sm:mt-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                              <div className="text-right">
+                                <p className="text-lg font-bold text-white font-mono">${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                <div className={cn(
+                                  "text-xs font-bold flex items-center justify-end gap-1 mt-0.5",
+                                  pnl >= 0 ? "text-emerald-400" : "text-red-400"
+                                )}>
+                                  {pnl >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                  {Math.abs(pnl).toFixed(2)}%
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-8 pt-6 border-t border-white/5 text-center shrink-0">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-bold">
+                    Last Portfolio Valuation: {new Date(vpData?.lastUpdated || Date.now()).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Settings Sidebar */}
       <AnimatePresence>
@@ -2560,6 +2723,18 @@ export default function Home() {
                     </div>
                     <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center">
                       <Trash2 size={16} className="text-red-400" />
+                    </div>
+                  </button>
+                  <button
+                    onClick={handleResetAgentTimeline}
+                    className="w-full p-4 mt-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-between group hover:bg-blue-500/20 transition-all text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-bold text-blue-400 group-hover:text-blue-300 transition-colors">Reset AI Analysis Timeline</p>
+                      <p className="text-[10px] text-slate-500 font-mono uppercase mt-1">Force refresh of standard tokens</p>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
+                      <RefreshCw size={16} className="text-blue-400" />
                     </div>
                   </button>
                 </div>
@@ -2767,8 +2942,24 @@ export default function Home() {
         </motion.h1>
         <p className="text-slate-400 text-base md:text-lg max-w-2xl mx-auto flex flex-col gap-2 mt-4 px-4">
           <span>AI-powered technical analysis<span className="hidden sm:inline"> for small investors</span>.</span>
-          <span className="text-blue-400 font-semibold tracking-wide uppercase text-xs md:text-sm">The 60/40 rule of safety and timing</span>
         </p>
+      </div>
+
+      {/* Main Agent Dashboard */}
+      {user && (
+        <div className="max-w-4xl mx-auto mb-16 px-4">
+          <AgentDashboard
+            userId={user.uid}
+            onModalAlert={showModalAlert}
+            onModalConfirm={showModalConfirm}
+          />
+        </div>
+      )}
+
+      <div className="flex items-center justify-center gap-4 mb-8">
+        <div className="h-px bg-white/10 w-24"></div>
+        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Manual Analysis</span>
+        <div className="h-px bg-white/10 w-24"></div>
       </div>
 
       {/* Search Bar */}
@@ -2908,39 +3099,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 md:gap-4 mt-auto">
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">Daily Low</div>
-                    <div className="text-lg md:text-xl font-mono font-bold text-red-400/90">${formatPrice(result.dailyLow)}</div>
-                  </div>
-
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2">Daily High</div>
-                    <div className="text-lg md:text-xl font-mono font-bold text-emerald-400/90">${formatPrice(result.dailyHigh)}</div>
-                  </div>
-
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">7D Avg</div>
-                    <div className="text-lg md:text-xl font-mono font-bold">{result.price7dAvg > 0 ? `$${formatPrice(result.price7dAvg)}` : "N/A"}</div>
-                  </div>
-
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">30D Avg</div>
-                    <div className="text-lg md:text-xl font-mono font-bold">{result.price30dAvg > 0 ? `$${formatPrice(result.price30dAvg)}` : "N/A"}</div>
-                  </div>
-
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">ATH</div>
-                    <div className="text-lg md:text-xl font-mono font-bold text-amber-400">${formatPrice(result.allTimeHigh)}</div>
-                    <div className="text-[9px] text-slate-500 font-medium font-mono">{result.athDate || "N/A"}</div>
-                  </div>
-
-                  <div className="bg-white/5 p-4 md:p-5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-                    <div className="text-slate-500 text-[9px] md:text-[10px] font-bold uppercase tracking-widest mb-1 md:mb-2 flex items-center gap-1">ATL</div>
-                    <div className="text-lg md:text-xl font-mono font-bold text-violet-400">${formatPrice(result.allTimeLow)}</div>
-                    <div className="text-[9px] text-slate-500 font-medium font-mono">{result.atlDate || "N/A"}</div>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -3044,27 +3202,7 @@ export default function Home() {
       </AnimatePresence>
 
       {/* Footer Info */}
-      {
-        !result && !loading && (
-          <div className="mt-20 hidden md:grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
-              <ShieldCheck className="mx-auto mb-4 text-blue-400" size={32} />
-              <h4 className="font-bold mb-2">Safety First</h4>
-              <p className="text-xs text-slate-500">60% focus on fundamentals to ensure long-term value preservation.</p>
-            </div>
-            <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
-              <TrendingUp className="mx-auto mb-4 text-emerald-400" size={32} />
-              <h4 className="font-bold mb-2">Perfect Timing</h4>
-              <p className="text-xs text-slate-500">40% focus on technical indicators to optimize entry and exit points.</p>
-            </div>
-            <div className="text-center p-6 grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all">
-              <Users className="mx-auto mb-4 text-purple-400" size={32} />
-              <h4 className="font-bold mb-2">Social Pulse</h4>
-              <p className="text-xs text-slate-500">Real-time analysis of Fear & Greed to capitalize on market sentiment.</p>
-            </div>
-          </div>
-        )
-      }
+
       {/* Portfolio Consultation Modal (Visual Process) */}
       <AnimatePresence>
         {isAgentOpen && !agentResult && (
@@ -3072,7 +3210,7 @@ export default function Home() {
             isOpen={isAgentOpen}
             onClose={() => setIsAgentOpen(false)}
             portfolioItems={portfolioItems}
-            watchlist={agentTargets}
+            watchlist={AGENT_WATCHLIST}
             userId={user?.uid || ''}
             onResult={(res) => setAgentResult(res)}
           />
@@ -3185,81 +3323,7 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* AI Agent Targets Modal */}
-      <AnimatePresence>
-        {isTargetsModalOpen && (
-          <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-6"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <Target className="text-violet-400" /> AI Target Assets
-                </h3>
-                <button
-                  onClick={() => setIsTargetsModalOpen(false)}
-                  className="p-2 rounded-xl hover:bg-white/5 text-slate-400 transition-all"
-                >
-                  <X size={20} />
-                </button>
-              </div>
 
-              <div className="space-y-4">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newTargetTicker}
-                    onChange={(e) => setNewTargetTicker(e.target.value.toUpperCase())}
-                    placeholder="ENTER TICKER (e.g. SOL)"
-                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white font-mono text-sm focus:outline-none focus:border-violet-500/50 transition-all"
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddTarget()}
-                  />
-                  <button
-                    onClick={handleAddTarget}
-                    className="bg-violet-600 hover:bg-violet-500 text-white px-4 py-3 rounded-xl font-bold transition-all"
-                  >
-                    <Plus size={20} />
-                  </button>
-                </div>
-
-                <div className="space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                  {agentTargets.map((t) => (
-                    <div key={t} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5 group">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center text-violet-400 font-bold text-xs">
-                          {t.slice(0, 2)}
-                        </div>
-                        <span className="text-white font-bold">{t}</span>
-                      </div>
-                      <button
-                        onClick={() => handleRemoveTarget(t)}
-                        className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  ))}
-                  {agentTargets.length === 0 && (
-                    <p className="text-center text-slate-500 text-sm py-4 italic">No targets defined. AI will use defaults.</p>
-                  )}
-                </div>
-
-                <div className="pt-4 border-t border-white/5">
-                  <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                    <span>Active Targets</span>
-                    <span className={cn(agentTargets.length >= 15 ? "text-red-400" : "text-violet-400")}>
-                      {agentTargets.length} / 15
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </main >
   );
 }

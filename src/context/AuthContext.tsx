@@ -16,6 +16,8 @@ interface AuthContextType {
     loading: boolean;
     signInWithGoogle: () => Promise<void>;
     logout: () => Promise<void>;
+    authError: string | null;
+    clearAuthError: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -23,6 +25,8 @@ const AuthContext = createContext<AuthContextType>({
     loading: true,
     signInWithGoogle: async () => { },
     logout: async () => { },
+    authError: null,
+    clearAuthError: () => { }
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -30,6 +34,7 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
+    const [authError, setAuthError] = useState<string | null>(null);
     const router = useRouter();
     const pathname = usePathname();
 
@@ -67,7 +72,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 // Successfully signed in
             } else {
                 await signOut(auth);
-                alert("Access Denied: Your account is not authorized to access this beta application.");
+                setAuthError("Access Denied: Your account is not authorized to access this beta application.");
             }
         } catch (error) {
             console.error("Error signing in with Google", error);
@@ -83,8 +88,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
     };
 
+    const clearAuthError = () => setAuthError(null);
+
     return (
-        <AuthContext.Provider value={{ user, loading, signInWithGoogle, logout }}>
+        <AuthContext.Provider value={{ user, loading, signInWithGoogle, logout, authError, clearAuthError }}>
             {children}
         </AuthContext.Provider>
     );

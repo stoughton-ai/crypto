@@ -88,29 +88,31 @@ export const fetchPortfolio = async (userId: string) => {
             orderBy("createdAt", "desc")
         );
         const querySnapshot = await getDocs(q);
-        const items = querySnapshot.docs.map(doc => ({
+        return querySnapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
         } as PortfolioItem));
+    } catch (error: any) {
+        console.warn("Ordered portfolio fetch failed, attempting fallback:", error.message || error);
 
-        return items;
-    } catch (error) {
-        console.error("Error fetching portfolio:", error);
-        // Fallback or check for index errors
-        if (error instanceof Error && error.message.includes("index")) {
-            console.warn("Firestore index required for portfolio. Falling back to client-side sort.");
+        try {
+            // Fallback: Fetch all for user and sort on client
             const qBasic = query(collection(db, PORTFOLIO_COLLECTION), where("userId", "==", userId));
             const snapshot = await getDocs(qBasic);
-            return snapshot.docs.map(doc => ({
+            const items = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
-            } as PortfolioItem)).sort((a: any, b: any) => {
-                const timeA = a.createdAt?.toMillis() || 0;
-                const timeB = b.createdAt?.toMillis() || 0;
+            } as PortfolioItem));
+
+            return items.sort((a: any, b: any) => {
+                const timeA = a.createdAt?.toMillis?.() || new Date(a.addedAt || 0).getTime();
+                const timeB = b.createdAt?.toMillis?.() || new Date(b.addedAt || 0).getTime();
                 return timeB - timeA;
             });
+        } catch (fallbackError) {
+            console.error("Critical portfolio fetch failure:", fallbackError);
+            return [];
         }
-        throw error;
     }
 };
 
@@ -162,9 +164,23 @@ export const fetchPortfolioHistory = async (userId: string) => {
             id: doc.id,
             ...doc.data()
         } as PortfolioSnapshot));
-    } catch (error) {
-        console.error("Error fetching portfolio history:", error);
-        return [];
+    } catch (error: any) {
+        console.warn("Portfolio history index missing, falling back to client sort:", error.message || error);
+        try {
+            const qBasic = query(collection(db, PORTFOLIO_HISTORY_COLLECTION), where("userId", "==", userId));
+            const snapshot = await getDocs(qBasic);
+            return snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            } as PortfolioSnapshot)).sort((a, b) => {
+                const timeA = a.createdAt?.toMillis?.() || new Date(a.timestamp || 0).getTime();
+                const timeB = b.createdAt?.toMillis?.() || new Date(b.timestamp || 0).getTime();
+                return timeA - timeB; // Ascending for history
+            });
+        } catch (fallbackError) {
+            console.error("Critical history fetch failure:", fallbackError);
+            return [];
+        }
     }
 };
 

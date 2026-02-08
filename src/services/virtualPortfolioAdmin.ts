@@ -1,4 +1,3 @@
-
 import { db } from "@/lib/firebase";
 import { adminDb } from "@/lib/firebase-admin";
 import {
@@ -17,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 
+
 const VP_COLLECTION = "virtual_portfolio";
 const VP_HISTORY_COLLECTION = "virtual_portfolio_history";
 const VP_TRADES_COLLECTION = "virtual_trades";
@@ -28,7 +28,6 @@ export interface VirtualPortfolio {
     holdings: Record<string, { amount: number, averagePrice: number }>; // ticker -> { amount, avgPrice }
     totalValue: number; // Cash + Holdings Value
     lastUpdated: string;
-    targets?: string[]; // Asset targets for the AI Agent
 }
 
 export interface VirtualTrade {
@@ -94,7 +93,6 @@ export const getVirtualHistory = async (userId: string) => {
 /**
  * Initializes the virtual portfolio if it doesn't exist.
  */
-import { AGENT_WATCHLIST } from "@/lib/constants";
 
 export async function initVirtualPortfolio(userId: string, initialBalance: number = 600) {
     if (!adminDb) return;
@@ -108,7 +106,6 @@ export async function initVirtualPortfolio(userId: string, initialBalance: numbe
             initialBalance: initialBalance, // Store the user's specific starting amount
             holdings: {},
             totalValue: initialBalance,
-            targets: AGENT_WATCHLIST, // Default targets
             lastUpdated: new Date().toISOString(),
             createdAt: FieldValue.serverTimestamp()
         });
@@ -368,9 +365,13 @@ export async function resetVirtualPortfolio(userId: string, initialBalance: numb
         const tradesSnapshot = await adminDb.collection(VP_TRADES_COLLECTION).where("userId", "==", userId).get();
         tradesSnapshot.forEach(doc => batch.delete(doc.ref));
 
+        // 4. Delete Decisions
+        const decisionsSnapshot = await adminDb.collection(VP_DECISIONS_COLLECTION).where("userId", "==", userId).get();
+        decisionsSnapshot.forEach(doc => batch.delete(doc.ref));
+
         await batch.commit();
 
-        // 4. Re-init
+        // 5. Re-init
         await initVirtualPortfolio(userId, initialBalance);
 
         return true;
@@ -380,45 +381,31 @@ export async function resetVirtualPortfolio(userId: string, initialBalance: numb
     }
 }
 
-/**
- * Fetches the user's AI Agent targets.
- */
-export async function getAgentTargetsAdmin(userId: string): Promise<string[]> {
-    if (!adminDb) return AGENT_WATCHLIST;
+export const getVirtualDecisions = async (userId: string) => {
     try {
-        const docRef = adminDb.collection(VP_COLLECTION).doc(userId);
-        const snapshot = await docRef.get();
-        if (snapshot.exists) {
-            const data = snapshot.data();
-            return data?.targets || AGENT_WATCHLIST;
-        }
+        const q = query(
+            collection(db, VP_DECISIONS_COLLECTION),
+            where("userId", "==", userId),
+            orderBy("date", "desc")
+        );
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
     } catch (e) {
-        console.error("Error fetching targets", e);
+        console.error("Error fetching VP decisions", e);
+        return [];
     }
-    return AGENT_WATCHLIST;
-}
+};
 
-/**
- * Updates the user's AI Agent targets. Max 15.
- */
-export async function updateAgentTargetsAdmin(userId: string, targets: string[]) {
-    if (!adminDb) return { success: false, message: "Admin SDK missing" };
-
-    // Validate
-    const cleanedTargets = targets
-        .map(t => t.trim().toUpperCase())
-        .filter(t => t.length > 0)
-        .slice(0, 15);
-
+export async function clearVirtualDecisions(userId: string) {
+    if (!adminDb) return false;
     try {
-        const docRef = adminDb.collection(VP_COLLECTION).doc(userId);
-        await docRef.update({
-            targets: cleanedTargets,
-            lastUpdated: new Date().toISOString()
-        });
-        return { success: true, targets: cleanedTargets };
+        const batch = adminDb.batch();
+        const snapshot = await adminDb.collection(VP_DECISIONS_COLLECTION).where("userId", "==", userId).get();
+        snapshot.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        return true;
     } catch (e) {
-        console.error("Error updating targets", e);
-        return { success: false, message: "Update failed" };
+        console.error("Error clearing virtual decisions:", e);
+        return false;
     }
 }

@@ -4,13 +4,18 @@ import { model, generateContentWithFallback, type CryptoAnalysisResult } from "@
 import { consultCryptoAgent, type AgentConsultationResult } from "@/lib/agent";
 import { type PortfolioItem } from "@/services/portfolioService";
 import { AGENT_WATCHLIST } from "@/lib/constants";
-import { initVirtualPortfolio, executeVirtualTrades, resetVirtualPortfolio, getAgentTargetsAdmin, updateAgentTargetsAdmin } from "@/services/virtualPortfolioAdmin";
+import { initVirtualPortfolio, executeVirtualTrades, resetVirtualPortfolio, clearVirtualDecisions } from "@/services/virtualPortfolioAdmin";
 import { adminDb, firebaseAdmin } from "@/lib/firebase-admin";
 
 const COMMON_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Accept': 'application/json'
 };
+
+function safeNumber(val: any, fallback: number = 0): number {
+  const num = Number(val);
+  return isNaN(num) || !isFinite(num) ? fallback : num;
+}
 
 /**
  * Optimized: Fetch chart data once for both 7d and 30d averages
@@ -58,41 +63,37 @@ async function fetchBinancePrice(ticker: string) {
   }
 }
 
-async function fetchKrakenPrice(ticker: string) {
-  try {
-    const pair = `${ticker.toUpperCase()}USD`;
-    const res = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, {
-      headers: COMMON_HEADERS,
-      next: { revalidate: 0 },
-      cache: 'no-store'
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const keys = Object.keys(data.result);
-    if (keys.length === 0) return null;
-    const result = data.result[keys[0]];
-    return parseFloat(result.c[0]);
-  } catch {
-    return null;
-  }
-}
-
 export async function getRealTimePrice(ticker: string) {
   try {
     const tickerUpper = ticker.toUpperCase();
+
+    // 1. Try CoinGecko First (Best Data)
+    let id = ticker.toLowerCase();
+
+    // Basic mapping for common coins to ensure correct ID
     const tickerMap: Record<string, string> = {
       'BTC': 'bitcoin', 'ETH': 'ethereum', 'SOL': 'solana', 'ADA': 'cardano',
       'XRP': 'ripple', 'DOT': 'polkadot', 'AVAX': 'avalanche-2', 'LINK': 'chainlink',
-      'GODS': 'gods-unchained', 'DOGE': 'dogecoin', 'MATIC': 'polygon', 'OP': 'optimism',
-      'ARB': 'arbitrum', 'TIA': 'celestia', 'SUI': 'sui', 'SEI': 'sei-network',
-      'PEPE': 'pepe', 'SHIB': 'shiba-inu', 'LTC': 'litecoin', 'NEAR': 'near',
+      'GODS': 'gods-unchained', 'DOGE': 'dogecoin', 'SHIB': 'shiba-inu', 'PEPE': 'pepe',
+      'MATIC': 'polygon', 'OP': 'optimism', 'ARB': 'arbitrum', 'TIA': 'celestia',
+      'SUI': 'sui', 'SEI': 'sei-network', 'LTC': 'litecoin', 'NEAR': 'near',
       'ICP': 'internet-computer', 'STX': 'stacks', 'INJ': 'injective-protocol',
       'RENDER': 'render-token', 'KAS': 'kaspa', 'FET': 'fetch-ai', 'HBAR': 'hedera-hashgraph',
       'DASH': 'dash', 'MNT': 'mantle', 'LEO': 'leo-token', 'HYPE': 'hyperliquid', 'BGB': 'bitget-token'
     };
 
-    let id = tickerMap[tickerUpper];
-    if (!id) {
+    const nameMap: Record<string, string> = {
+      'GODS': 'Gods Unchained (Gaming/NFT)',
+      'BTC': 'Bitcoin',
+      'ETH': 'Ethereum',
+      'SOL': 'Solana',
+      'TIA': 'Celestia (Modular)',
+      'HYPE': 'Hyperliquid'
+    };
+
+    if (tickerMap[tickerUpper]) id = tickerMap[tickerUpper];
+    else {
+      // Validation attempt via search if not mapped
       try {
         const searchRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${tickerUpper}`, { headers: COMMON_HEADERS });
         if (searchRes.ok) {
@@ -100,136 +101,54 @@ export async function getRealTimePrice(ticker: string) {
           const match = searchData.coins.find((c: any) => c.symbol === tickerUpper);
           if (match) id = match.id;
         }
-      } catch (e) { }
+      } catch { }
     }
-    if (!id) id = ticker.toLowerCase();
 
-    // Fetch primary data
     const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`, {
       headers: COMMON_HEADERS,
       next: { revalidate: 0 },
       cache: 'no-store'
-    }).catch(() => null);
+    });
 
-    const cgData = cgRes && cgRes.ok ? await cgRes.json() : null;
+    let cgData = null;
+    if (cgRes.ok) {
+      cgData = await cgRes.json();
+    }
+
+    // 2. Fallback to Binance if CoinGecko fails (Price only)
     const binancePrice = await fetchBinancePrice(tickerUpper);
 
     let finalPrice = 0;
     let verificationStatus = "Unverified";
     let change24h = 0;
-    let high24h = 0;
-    let low24h = 0;
     let mcap = 0;
-    let ath = 0;
-    let atl = 0;
-    let name = tickerUpper;
-    let cgIdUsed = id;
+    let name = nameMap[tickerUpper] || tickerUpper;
 
     if (cgData && cgData.market_data) {
-      const cgPrice = cgData.market_data.current_price.usd;
+      finalPrice = cgData.market_data.current_price.usd;
       change24h = cgData.market_data.price_change_percentage_24h;
-      high24h = cgData.market_data.high_24h.usd;
-      low24h = cgData.market_data.low_24h.usd;
       mcap = cgData.market_data.market_cap.usd;
-      ath = cgData.market_data.ath.usd;
-      atl = cgData.market_data.atl.usd;
       name = cgData.name;
+      verificationStatus = "CoinGecko";
 
+      // Verification check
       if (binancePrice) {
-        const diff = Math.abs((cgPrice - binancePrice) / cgPrice) * 100;
-        if (diff < 1.0) {
-          finalPrice = (cgPrice + binancePrice) / 2;
-          verificationStatus = "CoinGecko & Binance";
-        } else {
-          const krakenPrice = await fetchKrakenPrice(tickerUpper);
-          if (krakenPrice && Math.abs((cgPrice - krakenPrice) / cgPrice) < 1.0) {
-            finalPrice = (cgPrice + krakenPrice) / 2;
-            verificationStatus = "CoinGecko & Kraken";
-          } else {
-            finalPrice = binancePrice;
-            verificationStatus = "Binance (Exch)";
-          }
+        const diff = Math.abs((finalPrice - binancePrice) / finalPrice) * 100;
+        if (diff < 2.0) {
+          verificationStatus = "CoinGecko & Binance (Verified)";
         }
-      } else {
-        finalPrice = cgPrice;
-        verificationStatus = "CoinGecko";
       }
     } else if (binancePrice) {
       finalPrice = binancePrice;
-      verificationStatus = "Binance";
-    } else {
-      const krakenPrice = await fetchKrakenPrice(tickerUpper);
-      if (krakenPrice) {
-        finalPrice = krakenPrice;
-        verificationStatus = "Kraken";
-      } else {
-        // Source 4: CoinCap
-        try {
-          console.log(`[Pricing] Trying CoinCap fallback for ${tickerUpper} (ID: ${cgIdUsed})`);
-          const capRes = await fetch(`https://api.coincap.io/v2/assets/${cgIdUsed}`, {
-            headers: COMMON_HEADERS,
-            next: { revalidate: 0 },
-            cache: 'no-store'
-          });
-          if (capRes.ok) {
-            const capData = await capRes.json();
-            if (capData.data?.priceUsd) {
-              finalPrice = parseFloat(capData.data.priceUsd);
-              verificationStatus = "CoinCap (Fallback)";
-              change24h = parseFloat(capData.data.changePercent24Hr) || 0;
-              console.log(`[Pricing] CoinCap Success for ${tickerUpper}: $${finalPrice}`);
-            }
-          } else {
-            console.warn(`[Pricing] CoinCap returned ${capRes.status} for ${tickerUpper}`);
-          }
-        } catch (e) {
-          console.warn(`[Pricing] CoinCap Error for ${tickerUpper}:`, e);
-        }
-      }
+      verificationStatus = "Binance (Fallback)";
     }
 
-    // Source 5: CryptoCompare (High Availability Fallback)
-    if (finalPrice === 0) {
-      try {
-        console.log(`[Pricing] Trying CryptoCompare for ${tickerUpper}`);
-        const ccRes = await fetch(`https://min-api.cryptocompare.com/data/price?fsym=${tickerUpper}&tsyms=USD`, {
-          headers: COMMON_HEADERS,
-          next: { revalidate: 0 },
-          cache: 'no-store'
-        });
-        if (ccRes.ok) {
-          const ccData = await ccRes.json();
-          if (ccData.USD) {
-            finalPrice = parseFloat(ccData.USD);
-            verificationStatus = "CryptoCompare (Fallback)";
-            console.log(`[Pricing] CryptoCompare Success for ${tickerUpper}: $${finalPrice}`);
-          }
-        }
-      } catch (e) {
-        console.warn(`[Pricing] CryptoCompare Error for ${tickerUpper}:`, e);
-      }
-    }
-
-    if (finalPrice === 0) {
-      console.warn(`[Pricing] All sources failed for ${tickerUpper}. Verification Status: ${verificationStatus}`);
-      return null;
-    }
-
-    // Optimization: Only fetch averages if we have a valid ID and aren't hitting rate limits hard
-    const averages = (verificationStatus.includes("CoinGecko")) ? await fetchAverages(cgIdUsed) : { avg7d: 0, avg30d: 0 };
+    if (finalPrice === 0 || isNaN(finalPrice)) return null;
 
     return {
-      price: finalPrice,
-      change24h,
-      ath,
-      athDate: cgData?.market_data?.ath_date?.usd || "N/A",
-      atl,
-      atlDate: cgData?.market_data?.atl_date?.usd || "N/A",
-      mcap,
-      high24h,
-      low24h,
-      avg7d: averages.avg7d || 0,
-      avg30d: averages.avg30d || 0,
+      price: safeNumber(finalPrice),
+      change24h: safeNumber(change24h),
+      mcap: safeNumber(mcap),
       name,
       verificationStatus
     };
@@ -240,50 +159,247 @@ export async function getRealTimePrice(ticker: string) {
 }
 
 export async function analyzeCrypto(ticker: string, historyContextString?: string): Promise<CryptoAnalysisResult> {
-  const realTimeData = await getRealTimePrice(ticker);
-
-  const historyContext = historyContextString
-    ? `HISTORICAL CONTEXT: ${historyContextString}`
-    : "First analysis for this asset.";
-
-  const groundingContext = realTimeData
-    ? `IMPORTANT DATA: Price: $${realTimeData.price.toFixed(realTimeData.price < 1 ? 4 : 2)}. Status: ${realTimeData.verificationStatus}. 24h: ${realTimeData.change24h?.toFixed(2)}%. High: ${realTimeData.high24h}. Low: ${realTimeData.low24h}. 7dAvg: ${realTimeData.avg7d}. 30dAvg: ${realTimeData.avg30d}. ATH: ${realTimeData.ath}. ATL: ${realTimeData.atl}.`
-    : "LIVE PRICING UNAVAILABLE. DO NOT TRADE.";
-
-  const prompt = `
-    Analyze ticker "${ticker}". 
-    \${groundingContext}
-    \${historyContext}
-    
-    Current Date: \${new Date().toLocaleDateString('en-GB')}
-    
-    Provide 10 signals (Tokenomics, MVRV, RSI, Sentiment, MA 50/200, Active Addresses, Dev Activity, Net Flow, Volume, FDV).
-    Return JSON: { ticker, name, currentPrice, priceChange24h, price7dAvg, price30dAvg, dailyHigh, dailyLow, allTimeHigh, athDate, allTimeLow, atlDate, marketCap, verificationStatus, trafficLight, overallScore, signals: [{ name, category, weight, score, status, whyItMatters }], summary, historicalInsight }
-    CRITICAL: If IMPORTANT DATA says 0 or UNAVAILABLE, set currentPrice to 0.
-  `;
-
   try {
+    const realTimeData = await getRealTimePrice(ticker);
+
+    const historyContext = historyContextString
+      ? `HISTORICAL CONTEXT: ${historyContextString}`
+      : "First analysis for this asset.";
+
+    const groundingContext = realTimeData
+      ? `IMPORTANT DATA: Price: $${realTimeData.price.toFixed(realTimeData.price < 1 ? 4 : 2)}. Status: ${realTimeData.verificationStatus}. 24h: ${realTimeData.change24h?.toFixed(2)}%. Market Cap: $${realTimeData.mcap?.toLocaleString()}.`
+      : "LIVE PRICING UNAVAILABLE. DO NOT TRADE.";
+
+    const tickerName = realTimeData?.name || ticker;
+
+    const prompt = `
+      ROLE: You are an elite Crypto Quantitative Analyst. Your job is to provide a purely data-driven technical assessment of "${tickerName}" (${ticker}).
+      
+      MARKET DATA (ABSOLUTE TRUTH):
+      ${groundingContext}
+      
+      HISTORICAL PERFORMANCE:
+      ${historyContext}
+      
+      DATE: ${new Date().toLocaleDateString('en-GB')}
+      
+      TASK:
+      1. Analyze the asset based *strictly* on standard technical indicators (RSI, MACD, MA Divergence) and On-Chain metrics (MVRV, Net Flow).
+      2. SCORING RULES:
+         - 0-35: STRONG SELL (Bearish momentum, broken support, overvalued).
+         - 36-49: SELL / WEAK (Downtrend w/o reversal signs).
+         - 50-60: NEUTRAL (Choppy, consolidation, no clear direction).
+         - 61-75: BUY (Uptrend, holding support, positive volume).
+         - 76-100: STRONG BUY (Breakout, high volume, key resistance cleared).
+      
+      3. CRITICAL INSTRUCTION:
+         - Do NOT hallucinate bullish news. If price is down 5% in 24h, you cannot rate it a 70+ unless there is a massive hidden divergence. 
+         - A massive Market Cap coin like BTC cannot move like a memecoin. Adjust expectations.
+         - If verification status is "Unverified", automatic score penalty of -10.
+      
+      OUTPUT JSON:
+      {
+        "ticker": "${ticker}",
+        "name": "Token Name", 
+        "currentPrice": (Use Market Data),
+        "priceChange24h": (Use Market Data),
+        "trafficLight": "RED" | "AMBER" | "GREEN", 
+        "overallScore": (0-100 integer),
+        "summary": "2 concise sentences explaining the score based on data.",
+        "signals": [
+           // Generate exactly 10 Key Signals covering 4 categories: "Technical", "Fundamental", "On-Chain", "Sentiment"
+           // Each weight must be a number! (e.g. 10). Total weights must sum to 100.
+           { 
+             "name": "RSI (14)", 
+             "category": "Technical", 
+             "score": (0-100), 
+             "status": "RED" | "AMBER" | "GREEN", 
+             "weight": (number), 
+             "whyItMatters": "..." 
+           }
+        ]
+      }
+    `;
+
     const responseText = await generateContentWithFallback(prompt);
+
+    // Safety check for empty response
+    if (!responseText) {
+      throw new Error("AI returned empty response");
+    }
+
     const cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
-    return JSON.parse(cleanJson) as CryptoAnalysisResult;
-  } catch (error) {
+
+    try {
+      const aiResult = JSON.parse(cleanJson);
+
+      const finalResult = {
+        ...aiResult,
+        ticker: ticker.toUpperCase(),
+        currentPrice: safeNumber(realTimeData?.price || aiResult.currentPrice),
+        priceChange24h: safeNumber(realTimeData?.change24h || aiResult.priceChange24h),
+        marketCap: safeNumber(realTimeData?.mcap || aiResult.marketCap),
+        overallScore: safeNumber(aiResult.overallScore),
+        verificationStatus: realTimeData?.verificationStatus || "Research Only",
+        historicalInsight: historyContextString || "New analysis"
+      } as CryptoAnalysisResult;
+
+      // Final validation - if price is still 0/NaN after AI fallback, reject
+      if (finalResult.currentPrice <= 0) {
+        throw new Error(`Invalid price detected for ${ticker}`);
+      }
+
+      return finalResult;
+    } catch (e) {
+      console.error("JSON Parse Error:", e, "Raw Text:", responseText);
+      throw new Error("Failed to parse AI response");
+    }
+
+  } catch (error: any) {
     console.error("Analysis failed:", error);
-    throw new Error("AI Analysis Failed");
+    // Return a clean error string that can be serialized to the client
+    throw new Error(error.message || "AI Analysis Failed");
   }
+}
+
+// Helper to get config server-side
+async function getServerAgentConfig(userId: string) {
+  if (!adminDb) return null;
+  const doc = await adminDb.collection('agent_configs').doc(userId).get();
+
+  if (doc.exists) {
+    return doc.data() as {
+      trafficLightTokens: string[],
+      standardTokens: string[],
+      lastCheck?: Record<string, string>
+    };
+  }
+
+  // Default fallback if not set up yet
+  return {
+    trafficLightTokens: ["BTC", "ETH", "SOL"],
+    standardTokens: ["XRP", "DOGE", "ADA", "DOT", "LINK", "MATIC", "AVAX"],
+    lastCheck: {}
+  };
+}
+
+export async function manualAgentCheckStream(userId: string, initialBalance: number = 600) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const sendUpdate = (msg: string) => controller.enqueue(encoder.encode(msg + "\n"));
+
+      try {
+        sendUpdate("Loading Configuration...");
+        const config = await getServerAgentConfig(userId);
+        if (!config) {
+          sendUpdate("Error: Config missing");
+          controller.close();
+          return;
+        }
+
+        const { trafficLightTokens, standardTokens, lastCheck = {} } = config;
+        const now = Date.now();
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+        let analyzedCount = 0;
+        let skippedCount = 0;
+
+        // --- Define Retry Queue Logic ---
+        interface AnalysisTask {
+          ticker: string;
+          type: 'Priority' | 'Standard';
+          attempts: number;
+        }
+
+        const queue: AnalysisTask[] = [];
+
+        // 1. Initial Queueing
+        for (const t of trafficLightTokens) {
+          queue.push({ ticker: t, type: 'Priority', attempts: 1 });
+        }
+
+        for (const t of standardTokens) {
+          const lastTime = lastCheck[t.toUpperCase()] ? new Date(lastCheck[t.toUpperCase()]).getTime() : 0;
+          if (now - lastTime > ONE_DAY_MS) {
+            queue.push({ ticker: t, type: 'Standard', attempts: 1 });
+          } else {
+            skippedCount++;
+            sendUpdate(`[Standard] Skipping ${t} (Recently checked)`);
+          }
+        }
+
+        // 2. Process Queue with Retries at the End
+        while (queue.length > 0) {
+          const task = queue.shift()!;
+          const retryText = task.attempts > 1 ? ` (Retry ${task.attempts - 1}/10)` : '';
+          sendUpdate(`[${task.type}] Analyzing ${task.ticker}${retryText}...`);
+
+          await new Promise(r => setTimeout(r, 1500)); // Rate limit
+          const res = await manualAgentAnalyzeSingle(userId, task.ticker);
+
+          if (res.success) {
+            analyzedCount++;
+            sendUpdate(`[${task.type}] ${task.ticker} Result: ${res.trafficLight} (${res.score})`);
+            if (task.type === 'Standard') {
+              lastCheck[task.ticker.toUpperCase()] = new Date().toISOString();
+            }
+          } else {
+            if (task.attempts < 10) {
+              sendUpdate(`[${task.type}] ${task.ticker} Failed: ${res.message}. Adding to retry queue...`);
+              queue.push({ ...task, attempts: task.attempts + 1 });
+            } else {
+              sendUpdate(`[${task.type}] ${task.ticker} Final Failure: ${res.message} (Max retries reached)`);
+            }
+          }
+        }
+
+        // 3. Save updated timestamps
+        if (adminDb && analyzedCount > 0) {
+          sendUpdate("Saving Analysis Data...");
+          await adminDb.collection('agent_configs').doc(userId).set({ lastCheck }, { merge: true });
+        }
+
+        // 4. Execute Trades (Check ALL tracked tokens for valid signals)
+        sendUpdate("Evaluating Trading Strategies...");
+        const allTracked = [...trafficLightTokens, ...standardTokens];
+        if (analyzedCount > 0 || skippedCount > 0) {
+          await manualAgentExecuteTrades(userId, initialBalance, allTracked);
+          sendUpdate("DONE");
+        } else {
+          sendUpdate("DONE");
+        }
+      } catch (e: any) {
+        sendUpdate(`Error: ${e.message}`);
+      } finally {
+        controller.close();
+      }
+    }
+  });
+
+  return stream;
+}
+
+// Keep old function for compatibility if needed, but it's largely superseded
+export async function manualAgentCheck(userId: string, initialBalance: number = 600) {
+  // Legacy support wrapper or unused
+  return { success: false, message: "Use stream endpoint" };
 }
 
 export async function manualAgentAnalyzeSingle(userId: string, ticker: string) {
   if (!adminDb) return { success: false, message: "Admin SDK missing" };
 
-  const MAX_RETRIES = 1;
+  const MAX_RETRIES = 0;
+  const upperTicker = ticker.toUpperCase();
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const historyContext = await fetchHistoricalContext(userId, ticker);
+      const historyContext = await fetchHistoricalContext(userId, upperTicker);
       if (attempt > 0) await new Promise(r => setTimeout(r, 3000));
 
-      const analysis = await analyzeCrypto(ticker, historyContext);
+      const analysis = await analyzeCrypto(upperTicker, historyContext);
 
-      if (analysis.verificationStatus.includes("Unavailable") || analysis.currentPrice === 0) {
+      if (!analysis.verificationStatus || analysis.verificationStatus.includes("Unavailable") || analysis.currentPrice === 0) {
         if (attempt === MAX_RETRIES) return { success: false, message: "Price Verification Failed" };
         continue;
       }
@@ -299,40 +415,72 @@ export async function manualAgentAnalyzeSingle(userId: string, ticker: string) {
       await enforceLibraryLimit(userId);
       return { success: true, score: analysis.overallScore, trafficLight: analysis.trafficLight };
     } catch (e: any) {
+      console.warn(`Analysis error for ${upperTicker}:`, e);
       if (attempt === MAX_RETRIES) return { success: false, message: e.message || "Error" };
     }
   }
   return { success: false, message: "Failed" };
 }
 
-export async function manualAgentExecuteTrades(userId: string, initialBalance: number = 600) {
+export async function manualAgentExecuteTrades(userId: string, initialBalance: number = 600, targetTokens?: string[]) {
   if (!adminDb) return { success: false, message: "Admin SDK missing" };
   try {
     const reports: any[] = [];
-    const targets = await getAgentTargetsAdmin(userId);
+    // Use passed targets or fetch default config if direct call
+    let targets = targetTokens;
+    if (!targets) {
+      const conf = await getServerAgentConfig(userId);
+      targets = [...(conf?.trafficLightTokens || []), ...(conf?.standardTokens || [])];
+    }
+
+    // Safety fallback
+    if (!targets || targets.length === 0) targets = AGENT_WATCHLIST;
+
     const now = Date.now();
 
     for (const ticker of targets) {
-      const snap = await adminDb.collection('intel_reports')
-        .where('userId', '==', userId)
-        .where('ticker', '==', ticker.toUpperCase())
-        .get();
+      let snap;
+      try {
+        snap = await adminDb.collection('intel_reports')
+          .where('userId', '==', userId)
+          .where('ticker', '==', ticker.toUpperCase())
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
+      } catch (e) {
+        console.warn(`Fallback: Missing index for trading query (${ticker}). Sorting client-side.`);
+        snap = await adminDb.collection('intel_reports')
+          .where('userId', '==', userId)
+          .where('ticker', '==', ticker.toUpperCase())
+          .get();
 
-      if (!snap.empty) {
-        const docs = snap.docs.map(d => d.data());
-        docs.sort((a, b) => (b.createdAt?.toDate?.().getTime() || 0) - (a.createdAt?.toDate?.().getTime() || 0));
-        const latest = docs[0];
-        if (latest && (now - (latest.createdAt?.toDate?.().getTime() || 0)) < 40 * 60 * 1000) {
+        if (!snap.empty) {
+          const docs = snap.docs.map(d => d.data());
+          docs.sort((a, b) => (b.createdAt?.toDate?.().getTime() || 0) - (a.createdAt?.toDate?.().getTime() || 0));
+          const latest = docs[0];
+          if (latest && (now - (latest.createdAt?.toDate?.().getTime() || 0)) < 25 * 60 * 60 * 1000) {
+            reports.push(latest);
+          }
+          continue;
+        }
+      }
+
+      if (snap && !snap.empty) {
+        const latest = snap.docs[0].data();
+        if (latest && (now - (latest.createdAt?.toDate?.().getTime() || 0)) < 25 * 60 * 60 * 1000) {
           reports.push(latest);
         }
       }
     }
 
-    if (reports.length === 0) return { success: false, message: "No fresh reports found." };
+    if (reports.length === 0) return { success: false, message: "No active reports found." };
+
+    // Initialize if needed (idempotent checks inside)
     await initVirtualPortfolio(userId, initialBalance);
     await executeVirtualTrades(userId, reports);
     return { success: true };
   } catch (e: any) {
+    console.error("Trade execution failed:", e);
     return { success: false, message: e.message };
   }
 }
@@ -347,7 +495,7 @@ async function fetchHistoricalContext(userId: string, ticker: string): Promise<s
       .get();
     if (snap.empty) return "";
     const docs = snap.docs.map(d => d.data()).sort((a, b) => (b.createdAt?.toDate?.().getTime() || 0) - (a.createdAt?.toDate?.().getTime() || 0)).slice(0, 3);
-    return docs.map((d: any) => `Date: \${d.savedAt} | Score: \${d.overallScore}`).join(" ");
+    return docs.map((d: any) => `Date: ${d.savedAt} | Score: ${d.overallScore}`).join(" ");
   } catch { return ""; }
 }
 
@@ -371,10 +519,8 @@ async function enforceLibraryLimit(userId: string) {
   } catch { }
 }
 
-export async function getAgentTargets(userId: string) { return await getAgentTargetsAdmin(userId); }
-export async function updateAgentTargets(userId: string, targets: string[]) { return await updateAgentTargetsAdmin(userId, targets); }
 export async function getAgentConsultation(userId: string, portfolio: PortfolioItem[]) {
-  const targets = await getAgentTargetsAdmin(userId);
+  const targets = AGENT_WATCHLIST; // Reverted to constant
   const prices = await getVerifiedPrices(targets);
   const context = portfolio.map(p => ({ ticker: p.ticker, amount: p.amount, currentPrice: prices[p.ticker]?.price || 0 }));
   return await consultCryptoAgent(context, prices, targets);
@@ -403,21 +549,10 @@ export async function getLegacyReports() {
   return [];
 }
 
-export async function manualAgentCheck(userId: string, initialBalance: number = 600) {
-  // Wrapper for compatibility
-  const targets = await getAgentTargetsAdmin(userId);
-  let successCount = 0;
-  for (const t of targets) {
-    const res = await manualAgentAnalyzeSingle(userId, t);
-    if (res.success) {
-      successCount++;
-    } else {
-      console.warn(`[ManualCheck] Failed to analyze ${t}:`, res.message);
-    }
-  }
-  if (successCount > 0) {
-    await manualAgentExecuteTrades(userId, initialBalance);
-    return { success: true };
-  }
-  return { success: false };
+
+export async function clearDecisions(userId: string) {
+  try {
+    const success = await clearVirtualDecisions(userId);
+    return { success };
+  } catch { return { success: false }; }
 }
