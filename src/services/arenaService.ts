@@ -14,6 +14,7 @@ import {
     type ArenaConfig, type ArenaPool, type ArenaTradeRecord,
     type PoolStrategy, type PoolId, type PoolPerformance,
     type TradeReflection, type WeeklyReview, type StrategyChange,
+    type DcaConfig, type DcaContributionRecord,
     ARENA_START_DATE, ARENA_DURATION_DAYS, ARENA_WEEK_LENGTH,
     POOL_COUNT, POOL_BUDGET, TOTAL_BUDGET, TOKENS_PER_POOL,
     type AssetClass, getArenaCollections,
@@ -697,6 +698,99 @@ export async function activateCompetitionMode(userId: string, assetClass: AssetC
     console.log(`[Arena:${assetClass}] 🏆 Competition mode ACTIVATED for user ${userId.substring(0, 8)}`);
     return { success: true, message: `${assetClass} arena is now in 28-day competition mode. Start date: ${now}.` };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DCA (DOLLAR COST AVERAGING) HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Read the dca_config document for a user, or return a default if it doesn't exist yet. */
+export async function getDcaConfig(userId: string): Promise<DcaConfig | null> {
+    if (!adminDb) return null;
+    const snap = await adminDb.collection('dca_config').doc(userId).get();
+    if (!snap.exists) return null;
+    return snap.data() as DcaConfig;
+}
+
+/**
+ * Credit a DCA deposit to a pool's ring-fenced reserve.
+ * Called by the Saturday cron for each pool after the AI decides the split.
+ *
+ * - Increments pool.dcaReserve (ring-fenced, separate from cashBalance)
+ * - Increments pool.dcaContributions (lifetime total)
+ * - Appends an audit record to dca_config.history
+ * - Updates dca_config.totalDeposited
+ */
+export async function creditDcaReserve(
+    userId: string,
+    poolId: PoolId,
+    amount: number,
+    marketCondition: DcaContributionRecord['marketCondition'],
+): Promise<void> {
+    if (!adminDb || amount <= 0) return;
+
+    const arena = await getArenaConfig(userId, 'CRYPTO');
+    if (!arena) return;
+
+    const poolIdx = arena.pools.findIndex(p => p.poolId === poolId);
+    if (poolIdx < 0) return;
+
+    const pool = arena.pools[poolIdx];
+    pool.dcaReserve = (pool.dcaReserve ?? 0) + amount;
+    pool.dcaContributions = (pool.dcaContributions ?? 0) + amount;
+    arena.pools[poolIdx] = pool;
+
+    await adminDb.collection('arena_config').doc(userId).set(arena);
+
+    // Append audit record
+    const record: DcaContributionRecord = {
+        date: new Date().toISOString(),
+        poolId,
+        credited: amount,
+        deployed: 0,
+        marketCondition,
+    };
+
+    const dcaRef = adminDb.collection('dca_config').doc(userId);
+    const { FieldValue } = await import('firebase-admin/firestore');
+    await dcaRef.set({
+        totalDeposited: FieldValue.increment(amount),
+        history: FieldValue.arrayUnion(record),
+        lastDepositDate: new Date().toISOString().split('T')[0],
+    }, { merge: true });
+
+    console.log(`[DCA] ✅ Credited $${amount.toFixed(2)} to ${poolId} dcaReserve. New reserve: $${pool.dcaReserve.toFixed(2)}`);
+}
+
+/**
+ * Update DCA accounting after the AI deploys reserve capital into a trade.
+ * Call this AFTER a successful Revolut buy that consumed DCA reserve funds.
+ *
+ * - Decrements pool.dcaReserve
+ * - Increments pool.dcaDeployedTotal
+ * - Increments dca_config.totalDeployed
+ */
+export async function deployFromDcaReserve(
+    userId: string,
+    pool: ArenaPool,
+    amount: number,
+): Promise<void> {
+    if (!adminDb || amount <= 0) return;
+
+    const deployed = Math.min(amount, pool.dcaReserve ?? 0);
+    if (deployed <= 0) return;
+
+    pool.dcaReserve = Math.max(0, (pool.dcaReserve ?? 0) - deployed);
+    pool.dcaDeployedTotal = (pool.dcaDeployedTotal ?? 0) + deployed;
+
+    const dcaRef = adminDb.collection('dca_config').doc(userId);
+    const { FieldValue } = await import('firebase-admin/firestore');
+    await dcaRef.set({
+        totalDeployed: FieldValue.increment(deployed),
+    }, { merge: true });
+
+    console.log(`[DCA] 🚀 Deployed $${deployed.toFixed(2)} from ${pool.poolId} reserve. Remaining: $${pool.dcaReserve.toFixed(2)}`);
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EXPORTS

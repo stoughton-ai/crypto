@@ -122,23 +122,27 @@ async function main() {
             }
 
             // ── 2. Reset pool performance, holdings & cash ───────────────────────
-            const updatedPools = (arena.pools as any[]).map((p: any) => ({
-                ...p,
-                performance: freshPerformance(competitionStart),
-                weeklyReviews: [],
-                cashBalance: POOL_BUDGET,
-                holdings: {},
-                lastSoldAt: {},
-                scoreHistory: {},
-                strategyHistory: p.strategyHistory || [],
-            }));
+            // Only do a full reset when there are no surviving post-competition trades.
+            // If trades survived the purge, pool state must be reconciled from
+            // those trades instead — run reconcile_ftse_pools.ts for that.
+            if (kept > 0) {
+                console.log(`  ⚠ ${kept} post-competition trade(s) survived — skipping pool state reset.`);
+                console.log(`    Pool holdings already reflect those trades. No action needed.`);
+            } else {
+                const updatedPools = (arena.pools as any[]).map((p: any) => ({
+                    ...p,
+                    performance: freshPerformance(competitionStart),
+                    weeklyReviews: [],
+                    cashBalance: POOL_BUDGET,
+                    holdings: {},
+                    lastSoldAt: {},
+                    scoreHistory: {},
+                    strategyHistory: p.strategyHistory || [],
+                }));
+                await configRef.update({ pools: updatedPools, currentWeek: 1 });
+                console.log(`  Pool cash/holdings/performance reset to competition-start state.`);
+            }
 
-            await configRef.update({
-                pools: updatedPools,
-                currentWeek: 1,
-            });
-
-            console.log(`  Pool cash/holdings/performance reset to competition-start state.`);
         }
     }
 

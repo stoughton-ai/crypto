@@ -310,6 +310,14 @@ export interface ArenaPool {
     scoreHistory?: Record<string, { score: number; ts: string }[]>;
     // Last evaluation timestamp per token for cooldown enforcement
     lastEvaluatedAt?: Record<string, string>;
+
+    // ─── DCA RESERVE ──────────────────────────────────────────────────
+    // Ring-fenced capital from the weekly $60 Saturday deposit.
+    // Tracked SEPARATELY from cashBalance — regular buys cannot consume this.
+    // Only deployed when conviction score ≥ 85 (full deploy at ≥ 90).
+    dcaReserve?: number;         // DCA cash available for deployment ($)
+    dcaContributions?: number;   // Lifetime DCA capital credited to this pool ($)
+    dcaDeployedTotal?: number;   // Lifetime DCA capital actually deployed ($)
 }
 
 export interface ArenaConfig {
@@ -326,6 +334,33 @@ export interface ArenaConfig {
     competitionMode?: boolean;
     /** True while a non-crypto arena is still in sandbox/testing mode */
     sandboxMode?: boolean;
+}
+
+// ─── DCA SYSTEM TYPES ─────────────────────────────────────────────────────────────────
+// Stored in Firestore: dca_config/{userId}
+
+export interface DcaContributionRecord {
+    date: string;             // ISO — the Saturday this deposit ran
+    poolId: string;           // Which pool received the credit
+    credited: number;         // Amount credited to dcaReserve ($)
+    deployed: number;         // Amount actually deployed from reserve this week ($)
+    marketCondition: {
+        fng: number;          // Fear & Greed Index at time of deposit
+        btc30d: number;       // BTC 30-day % return
+        navVsInvested: number; // Portfolio NAV / totalInvested ratio
+    };
+}
+
+export interface DcaConfig {
+    userId: string;
+    enabled: boolean;           // Master on/off switch
+    weeklyAmount: number;       // Total weekly injection ($60)
+    lastDepositDate: string;    // ISO — idempotency guard, prevents double-crediting
+    totalDeposited: number;     // Lifetime total credited across all pools ($)
+    totalDeployed: number;      // Lifetime total deployed across all pools ($)
+    pausedAt?: string;          // ISO — when auto-paused (market recovered)
+    pauseReason?: string;       // Human-readable reason for pause
+    history: DcaContributionRecord[]; // Audit trail of every deposit
 }
 
 export interface ArenaTradeRecord {

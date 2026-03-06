@@ -25,6 +25,8 @@ import { RevolutX } from "@/lib/revolut";
 import { loadQuotaGuardUsage, persistQuotaGuardUsage, getQuotaGuardUsage } from '@/lib/revolut';
 import { fetchTechnicalDataForTokens, formatTechnicalDataForPrompt, type TechnicalIndicators } from '@/lib/technicals';
 import { fetchOrderBooksForTokens, formatOrderBookForPrompt, type OrderBookData } from '@/lib/orderbook';
+import { checkEODHDQuota } from '@/lib/eodhd-quota';
+import { deployFromDcaReserve } from '@/services/arenaService';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // COMMON UTILITIES
@@ -152,43 +154,16 @@ function resetBrainLog(userId: string) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const EODHD_API_KEY = process.env.EODHD_API_KEY || '';
-const EODHD_EFFECTIVE_LIMIT = EODHD_DAILY_LIMIT;
-let eodhdUsageCache: { used: number; limit: number; remaining: number; checkedAt: number } | null = null;
-const EODHD_USAGE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const eodhdCache: Map<string, { data: { price: number; change24h: number; volume: number; source: string }; ts: number }> = new Map();
 const EODHD_CACHE_TTL_MS = 20_000; // 20s cache for aggressive 3-min refreshes
 
-async function checkEODHDUsage(): Promise<{ used: number; limit: number; remaining: number; pct: number }> {
-  const now = Date.now();
-  if (eodhdUsageCache && (now - eodhdUsageCache.checkedAt) < EODHD_USAGE_CHECK_INTERVAL_MS) {
-    return { ...eodhdUsageCache, pct: eodhdUsageCache.used / eodhdUsageCache.limit };
-  }
-  try {
-    const res = await fetch(`https://eodhd.com/api/user?api_token=${EODHD_API_KEY}&fmt=json`, { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      const used = data.apiRequests || 0;
-      const rawLimit = (data.dailyRateLimit || 100000) + (data.extraLimit || 0);
-      const limit = Math.min(rawLimit, EODHD_EFFECTIVE_LIMIT);
-      const remaining = limit - used;
-      eodhdUsageCache = { used, limit, remaining, checkedAt: now };
-      const pct = used / limit;
-      if (pct >= EODHD_CRITICAL_THRESHOLD) {
-        console.error(`[EODHD] 🚨 CRITICAL: ${used}/${limit} (${(pct * 100).toFixed(1)}%). BLOCKED.`);
-      } else if (pct >= EODHD_THROTTLE_THRESHOLD) {
-        console.warn(`[EODHD] ⚠️ THROTTLE: ${used}/${limit} (${(pct * 100).toFixed(1)}%).`);
-      }
-      return { used, limit, remaining, pct };
-    }
-  } catch {
-    console.warn('[EODHD] Usage check failed');
-  }
-  if (eodhdUsageCache) return { ...eodhdUsageCache, pct: eodhdUsageCache.used / eodhdUsageCache.limit };
-  return { used: 0, limit: EODHD_EFFECTIVE_LIMIT, remaining: EODHD_EFFECTIVE_LIMIT, pct: 0 };
+// ── Quota check delegates to shared module (also used by technicals.ts) ──────
+async function checkEODHDUsage() {
+  return checkEODHDQuota();
 }
 
 export async function getEODHDUsage() {
-  return checkEODHDUsage();
+  return checkEODHDQuota();
 }
 
 export async function fetchEODHDPrices(tickers: string[]): Promise<Record<string, { price: number; change24h: number; volume: number; source: string }>> {
@@ -964,6 +939,19 @@ export async function runArenaCycle(userId: string): Promise<{
     // 3.2 Analyze each token in the pool
     const poolTrades: ArenaTradeRecord[] = [];
 
+    // ── Phase A: collect buy signals ────────────────────────────────────
+    // Sells execute immediately within the loop (they free cash).
+    // Buys are deferred to Phase B so we can size them proportionally
+    // using conviction (score²) weighting across all candidates.
+    const pendingBuys: Array<{
+      ticker: string;
+      smoothedScore: number;
+      price: number;
+      buyAmount: number; // units, sized in Phase B
+      reflection: string;
+      marketContext: { btcPrice: number; btcChange24h: number; tokenChange24h: number; fearGreedIndex: number };
+    }> = [];
+
     for (const ticker of pool.tokens) {
       const upper = ticker.toUpperCase();
       const priceData = prices[upper];
@@ -1128,9 +1116,11 @@ Fear & Greed: ${fng}/100 (${marketStats?.fearGreedStatus || 'Unknown'})`;
           }
         } else {
           // ─── BUY EVALUATION ───
-          // Uses SMOOTHED score + per-pool confidence buffer
+          // Uses SMOOTHED score + per-pool confidence buffer.
+          // Instead of executing immediately, push to pendingBuys so Phase B
+          // can weight the allocation by conviction before executing.
           if (smoothedScore >= pool.strategy.buyScoreThreshold + buyConfidenceBuffer) {
-            // Anti-wash check: don't re-buy a token that was sold within antiWashHours
+            // Anti-wash check
             const lastSold = pool.lastSoldAt?.[upper];
             if (lastSold && pool.strategy.antiWashHours > 0) {
               const hoursSinceSell = (Date.now() - new Date(lastSold).getTime()) / (1000 * 60 * 60);
@@ -1146,30 +1136,117 @@ Fear & Greed: ${fng}/100 (${marketStats?.fearGreedStatus || 'Unknown'})`;
               continue;
             }
 
-            // Budget management: AI decides position size
-            const maxSpend = Math.min(pool.cashBalance, pool.strategy.maxAllocationPerToken);
-            if (maxSpend < 10) continue; // Minimum $10
-
-            // Position sizing: Full conviction entry (100% allocation)
-            // The scaling multiplier has been removed to ensure maximum profit efficiency.
-            const buyTotal = maxSpend;
-            const buyAmount = buyTotal / priceData.price;
-
-            const reflection = `BUY signal: smoothed score ${smoothedScore} (raw: ${analysis.overallScore}, threshold ${pool.strategy.buyScoreThreshold}+${buyConfidenceBuffer}). Entry type: ${analysis.entryType}. ${analysis.summary}`;
-            // Execute on Revolut FIRST
-            const revolutResult = await executeRevolutTrade(userId, upper, 'BUY', buyAmount, priceData.price);
-            if (revolutResult.success) {
-              // Use actual fill price from Revolut when available
-              const actualPrice = revolutResult.fillPrice || priceData.price;
-              const result = await executePoolBuy(userId, pool, upper, buyAmount, actualPrice, reflection, marketContext, reflection);
-              if (result.success && result.trade) poolTrades.push(result.trade);
-            } else {
-              console.warn(`[Arena] ⚠️ Revolut BUY failed for ${upper} — arena state NOT updated`);
-            }
+            // Queue for Phase B — sizing happens after all tokens are evaluated
+            const tokenMarketContext = {
+              btcPrice, btcChange24h: btcChange,
+              tokenChange24h: priceData.change24h, fearGreedIndex: fng,
+            };
+            const buyReflection = `BUY signal: smoothed score ${smoothedScore} (raw: ${analysis.overallScore}, threshold ${pool.strategy.buyScoreThreshold}+${buyConfidenceBuffer}). Entry type: ${analysis.entryType}. ${analysis.summary}`;
+            pendingBuys.push({
+              ticker: upper,
+              smoothedScore,
+              price: priceData.price,
+              buyAmount: 0, // sized in Phase B
+              reflection: buyReflection,
+              marketContext: tokenMarketContext,
+            });
+            await setBrainStatus(userId, `${pool.emoji} 📌 ${upper}: BUY signal queued (score ${smoothedScore}). Sizing after all tokens evaluated.`);
           }
         }
       } catch (e: any) {
         console.warn(`[Arena] Analysis failed for ${upper} in ${pool.poolId}: ${e.message}`);
+      }
+    } // end Phase A token loop
+
+    // ── Phase B: Conviction-weighted buy execution ────────────────────────
+    // Score² amplification naturally produces decisive 60/40–70/30 splits
+    // when two tokens both pass the threshold at different conviction levels.
+    if (pendingBuys.length > 0) {
+      const availableCash = pool.cashBalance;
+
+      // Compute score²-amplified weights
+      const withWeight = pendingBuys.map(b => ({
+        ...b,
+        amp: b.smoothedScore * b.smoothedScore,
+      }));
+      const totalAmp = withWeight.reduce((sum, b) => sum + b.amp, 0);
+
+      // Build sized allocations — skip any below $10 minimum
+      const allocations: typeof withWeight = [];
+      for (const signal of withWeight) {
+        const weight = signal.amp / totalAmp;
+        const targetAllocation = pendingBuys.length === 1
+          ? Math.min(availableCash, pool.strategy.maxAllocationPerToken)
+          : Math.min(availableCash * weight, pool.strategy.maxAllocationPerToken);
+
+        if (targetAllocation < 10) {
+          console.log(`[Arena] ${pool.emoji} ${signal.ticker}: conviction allocation $${targetAllocation.toFixed(2)} < $10 minimum — skipping`);
+          continue;
+        }
+        signal.buyAmount = targetAllocation / signal.price;
+        allocations.push(signal);
+      }
+
+      if (pendingBuys.length > 1 && allocations.length > 0) {
+        const splits = allocations.map(a => `${a.ticker} ${((a.amp / totalAmp) * 100).toFixed(0)}%`).join(' / ');
+        console.log(`[Arena] ${pool.emoji} Conviction sizing: ${splits}`);
+        await setBrainStatus(userId, `${pool.emoji} 🧠 Conviction-weighted allocation: ${splits}`);
+      }
+
+      // Execute buys in conviction order (highest score first)
+      allocations.sort((a, b) => b.smoothedScore - a.smoothedScore);
+      for (const alloc of allocations) {
+        const revolutResult = await executeRevolutTrade(userId, alloc.ticker, 'BUY', alloc.buyAmount, alloc.price);
+        if (revolutResult.success) {
+          const actualPrice = revolutResult.fillPrice || alloc.price;
+          const result = await executePoolBuy(userId, pool, alloc.ticker, alloc.buyAmount, actualPrice, alloc.reflection, alloc.marketContext, alloc.reflection);
+          if (result.success && result.trade) poolTrades.push(result.trade);
+        } else {
+          console.warn(`[Arena] ⚠️ Revolut BUY failed for ${alloc.ticker} — arena state NOT updated`);
+        }
+      }
+    }
+
+    // ── Phase B.2: DCA Reserve Deployment ───────────────────────────────
+    // Runs after regular buys. Checks if there is ring-fenced DCA capital
+    // waiting and if any signal meets the higher 85/90 conviction bar.
+    //
+    //   score 85–89: deploy 50% of dcaReserve (partial — good but not exceptional)
+    //   score 90+:   deploy 100% of dcaReserve (exceptional — maximum capital)
+    const dcaReserve = pool.dcaReserve ?? 0;
+    if (dcaReserve >= 10 && pendingBuys.length > 0) {
+      const bestSignal = [...pendingBuys].sort((a, b) => b.smoothedScore - a.smoothedScore)[0];
+
+      const DCA_PARTIAL_THRESHOLD = 85;
+      const DCA_FULL_THRESHOLD = 90;
+
+      if (bestSignal.smoothedScore >= DCA_PARTIAL_THRESHOLD) {
+        const isFullDeploy = bestSignal.smoothedScore >= DCA_FULL_THRESHOLD;
+        const dcaAmount = isFullDeploy ? dcaReserve : Math.round(dcaReserve * 0.5 * 100) / 100;
+
+        if (dcaAmount >= 10) {
+          const dcaBuyAmount = dcaAmount / bestSignal.price;
+          const dcaLabel = isFullDeploy ? 'FULL' : 'PARTIAL (50%)';
+          const dcaReflection = `DCA RESERVE ${dcaLabel} DEPLOY: $${dcaAmount.toFixed(2)} from ring-fenced reserve. Score ${bestSignal.smoothedScore} (≥${isFullDeploy ? DCA_FULL_THRESHOLD : DCA_PARTIAL_THRESHOLD} threshold). ${bestSignal.reflection}`;
+
+          await setBrainStatus(userId, `${pool.emoji} 💰 DCA reserve ${dcaLabel}: $${dcaAmount.toFixed(2)} → ${bestSignal.ticker} (score ${bestSignal.smoothedScore})`);
+          console.log(`[Arena] ${pool.emoji} DCA deploy ${dcaLabel}: $${dcaAmount.toFixed(2)} into ${bestSignal.ticker}`);
+
+          const dcaRevolutResult = await executeRevolutTrade(userId, bestSignal.ticker, 'BUY', dcaBuyAmount, bestSignal.price);
+          if (dcaRevolutResult.success) {
+            const actualPrice = dcaRevolutResult.fillPrice || bestSignal.price;
+            const result = await executePoolBuy(userId, pool, bestSignal.ticker, dcaBuyAmount, actualPrice, dcaReflection, bestSignal.marketContext, dcaReflection);
+            if (result.success && result.trade) {
+              poolTrades.push(result.trade);
+              // Update DCA accounting (decrements dcaReserve, increments dcaDeployedTotal)
+              await deployFromDcaReserve(userId, pool, dcaAmount);
+            }
+          } else {
+            console.warn(`[Arena] ⚠️ Revolut DCA BUY failed for ${bestSignal.ticker} — reserve NOT deployed`);
+          }
+        }
+      } else {
+        console.log(`[Arena] ${pool.emoji} DCA reserve $${dcaReserve.toFixed(2)} waiting — best score ${bestSignal.smoothedScore} < ${DCA_PARTIAL_THRESHOLD} threshold`);
       }
     }
 

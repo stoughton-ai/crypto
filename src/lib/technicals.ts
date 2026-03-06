@@ -1,10 +1,10 @@
 /**
  * TECHNICAL ANALYSIS ENGINE
- * 
+ *
  * Fetches real 1h intraday candles from EODHD and computes proper
  * technical indicators. Replaces the AI's hallucinated RSI/MA/volume scores
  * with ground-truth computed values.
- * 
+ *
  * Indicators computed:
  *   - RSI(14) from 1h candles
  *   - SMA(7), SMA(25) from 1h closes
@@ -13,13 +13,20 @@
  *   - Price position within 24h range (0-100%)
  *   - Multi-day price changes (3d, 7d)
  *   - Trend direction (from SMA slope)
+ *
+ * Quota gating (via shared eodhd-quota module):
+ *   - NORMAL   (0-90%)  → Fetches proceed with 15-min cache TTL.
+ *   - THROTTLE (90-95%) → Cache TTL extended to 60 min; fresh fetches skipped.
+ *   - CRITICAL (95%+)   → All candle fetches blocked; returns [] immediately.
  */
+
+import { checkEODHDQuota } from './eodhd-quota';
 
 const EODHD_API_KEY = process.env.EODHD_API_KEY || '';
 
 // ── Cache ────────────────────────────────────────────────────────────────
-// 15-minute TTL — 1h candles don't change fast enough to warrant more frequent fetches
-const CANDLE_CACHE_TTL_MS = 15 * 60 * 1000;
+const CANDLE_CACHE_TTL_NORMAL_MS = 15 * 60 * 1000;  // 15 min — standard
+const CANDLE_CACHE_TTL_THROTTLE_MS = 60 * 60 * 1000; // 60 min — conserve quota
 const candleCache: Map<string, { data: OHLCVCandle[]; ts: number }> = new Map();
 
 export interface OHLCVCandle {
@@ -54,29 +61,69 @@ export interface TechnicalIndicators {
 
 // ── Fetch 1h candles from EODHD ──────────────────────────────────────────
 
-export async function fetch1hCandles(ticker: string): Promise<OHLCVCandle[]> {
+/**
+ * Fetches 7 days of 1h OHLCV candles for a given ticker.
+ *
+ * @param ticker      Plain arena ticker (e.g. "BTC", "SHEL", "GLD").
+ * @param eodhdTicker Optional override for the full EODHD code (e.g. "SHEL.LSE").
+ *                    Defaults to the crypto format: "<TICKER>-USD.CC".
+ */
+export async function fetch1hCandles(
+    ticker: string,
+    eodhdTicker?: string,
+): Promise<OHLCVCandle[]> {
     const upper = ticker.toUpperCase();
     const now = Date.now();
 
-    // Check cache
+    // ── Quota gate ──────────────────────────────────────────────────────
+    const quota = await checkEODHDQuota();
+
+    if (quota.blocked) {
+        // CRITICAL — return whatever we have cached, even if stale
+        const stale = candleCache.get(upper);
+        if (stale) {
+            console.warn(`[TechAnalysis] EODHD CRITICAL — returning stale candles for ${upper}`);
+            return stale.data;
+        }
+        console.warn(`[TechAnalysis] EODHD CRITICAL — no candles for ${upper}, skipping`);
+        return [];
+    }
+
+    // Choose cache TTL based on quota level
+    const cacheTTL = quota.throttled
+        ? CANDLE_CACHE_TTL_THROTTLE_MS   // 60 min — conserve remaining budget
+        : CANDLE_CACHE_TTL_NORMAL_MS;    // 15 min — standard
+
+    // ── Cache check ─────────────────────────────────────────────────────
     const cached = candleCache.get(upper);
-    if (cached && (now - cached.ts) < CANDLE_CACHE_TTL_MS) {
+    if (cached && (now - cached.ts) < cacheTTL) {
         return cached.data;
+    }
+
+    // At THROTTLE level, skip live fetch and return stale/empty rather than burning quota
+    if (quota.throttled) {
+        if (cached) {
+            console.warn(`[TechAnalysis] EODHD THROTTLE — returning stale candles for ${upper} (${Math.round((now - cached.ts) / 60000)}m old)`);
+            return cached.data;
+        }
+        console.warn(`[TechAnalysis] EODHD THROTTLE — skipping fresh candle fetch for ${upper}`);
+        return [];
     }
 
     if (!EODHD_API_KEY) return [];
 
+    // ── Live fetch ──────────────────────────────────────────────────────
     try {
-        // Fetch last 7 days of 1h candles (168 candles max)
+        const eodhCode = eodhdTicker ?? `${upper}-USD.CC`;
         const fromTs = Math.floor((now - 7 * 24 * 60 * 60 * 1000) / 1000);
         const toTs = Math.floor(now / 1000);
-        const url = `https://eodhd.com/api/intraday/${upper}-USD.CC?api_token=${EODHD_API_KEY}&fmt=json&interval=1h&from=${fromTs}&to=${toTs}`;
+        const url = `https://eodhd.com/api/intraday/${eodhCode}?api_token=${EODHD_API_KEY}&fmt=json&interval=1h&from=${fromTs}&to=${toTs}`;
 
         const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) return [];
+        if (!res.ok) return cached?.data ?? [];
 
         const data = await res.json();
-        if (!Array.isArray(data) || data.length === 0) return [];
+        if (!Array.isArray(data) || data.length === 0) return cached?.data ?? [];
 
         const candles: OHLCVCandle[] = data.map((c: any) => ({
             timestamp: c.timestamp || Math.floor(new Date(c.datetime || c.date).getTime() / 1000),
@@ -87,15 +134,12 @@ export async function fetch1hCandles(ticker: string): Promise<OHLCVCandle[]> {
             volume: parseFloat(c.volume) || 0,
         })).filter((c: OHLCVCandle) => c.close > 0);
 
-        // Sort by timestamp ascending
         candles.sort((a, b) => a.timestamp - b.timestamp);
-
-        // Cache it
         candleCache.set(upper, { data: candles, ts: now });
         return candles;
     } catch (e: any) {
         console.warn(`[TechAnalysis] Failed to fetch candles for ${upper}: ${e.message}`);
-        return [];
+        return cached?.data ?? [];
     }
 }
 
