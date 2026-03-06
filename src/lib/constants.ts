@@ -44,28 +44,10 @@ export function formatEODHDTicker(ticker: string, assetClass: AssetClass): strin
             return `${t}.LSE`;
         case 'NYSE':
             return `${t}.US`;
-        case 'COMMODITIES': {
-            // Precious metals are priced via .FOREX as spot FX pairs
-            const forexMetals: Record<string, string> = {
-                XAU: 'XAUUSD.FOREX', XAG: 'XAGUSD.FOREX',
-                XPT: 'XPTUSD.FOREX', XPD: 'XPDUSD.FOREX',
-            };
-            if (forexMetals[t]) return forexMetals[t];
-            // Energy & agricultural use .COMM
-            const commMap: Record<string, string> = {
-                OIL: 'CLUSD.COMM', CL: 'CLUSD.COMM',
-                BRENT: 'BZUSD.COMM', BZ: 'BZUSD.COMM',
-                NG: 'NGUSD.COMM', NGAS: 'NGUSD.COMM',
-                WHEAT: 'ZWUSD.COMM', ZW: 'ZWUSD.COMM',
-                CORN: 'ZCUSD.COMM', ZC: 'ZCUSD.COMM',
-                SOY: 'ZSUSD.COMM', ZS: 'ZSUSD.COMM',
-                COFFEE: 'KCUSD.COMM', KC: 'KCUSD.COMM',
-                SUGAR: 'SBUSD.COMM', SB: 'SBUSD.COMM',
-                COPPER: 'HGUSD.COMM', HG: 'HGUSD.COMM',
-            };
-            if (commMap[t]) return commMap[t];
-            return `${t}USD.COMM`;
-        }
+        case 'COMMODITIES':
+            // Commodity ETFs traded on NYSE — all available via EODHD .US
+            // (EODHD .COMM futures and .FOREX spot are not available on this plan)
+            return `${t}.US`;
         default:
             return `${t}-USD.CC`;
     }
@@ -76,20 +58,7 @@ export function parseEODHDTicker(eodhdCode: string, assetClass: AssetClass): str
     if (assetClass === 'CRYPTO') return eodhdCode.replace('-USD.CC', '');
     if (assetClass === 'FTSE') return eodhdCode.replace('.LSE', '');
     if (assetClass === 'NYSE') return eodhdCode.replace('.US', '');
-    if (assetClass === 'COMMODITIES') {
-        // e.g. XAUUSD.FOREX → XAU, CLUSD.COMM → OIL
-        const reverseMap: Record<string, string> = {
-            'XAUUSD.FOREX': 'XAU', 'XAGUSD.FOREX': 'XAG',
-            'XPTUSD.FOREX': 'XPT', 'XPDUSD.FOREX': 'XPD',
-            'CLUSD.COMM': 'OIL', 'BZUSD.COMM': 'BRENT',
-            'NGUSD.COMM': 'NGAS', 'ZWUSD.COMM': 'WHEAT',
-            'ZCUSD.COMM': 'CORN', 'ZSUSD.COMM': 'SOY',
-            'KCUSD.COMM': 'COFFEE', 'SBUSD.COMM': 'SUGAR',
-            'HGUSD.COMM': 'COPPER',
-        };
-        if (reverseMap[eodhdCode]) return reverseMap[eodhdCode];
-        return eodhdCode.replace('USD.FOREX', '').replace('USD.COMM', '');
-    }
+    if (assetClass === 'COMMODITIES') return eodhdCode.replace('.US', '');
     return eodhdCode;
 }
 
@@ -188,15 +157,14 @@ export const NYSE_INSTRUMENT_LIST = [
 ];
 
 // ─── COMMODITIES ARENA INSTRUMENT UNIVERSE ────────────────────────────────────
-// EODHD formats: metals via .FOREX (e.g. XAUUSD.FOREX), energy/agri via .COMM
-// Currency: USD ($). Extended hours Mon–Fri.
-// AI selects 4 pairs (8 instruments) from this universe during initialisation.
-// Ticker keys used internally in the arena (human-readable, mapped to EODHD in formatEODHDTicker).
+// Uses commodity ETFs listed on NYSE — all confirmed available via EODHD .US
+// Grouped by category so the AI can build diversified cross-category pools.
+// Ticker keys are the ETF symbols (e.g. GLD, SLV, USO).
 export const COMMODITIES_WATCHLIST: Record<string, string[]> = {
-    PRECIOUS: ['XAU', 'XAG', 'XPT', 'XPD'],
-    ENERGY: ['OIL', 'BRENT', 'NGAS'],
-    AGRICULTURAL: ['WHEAT', 'CORN', 'SOY', 'COFFEE', 'SUGAR'],
-    BASE_METALS: ['COPPER'],
+    PRECIOUS: ['GLD', 'SLV', 'PPLT', 'PALL'],   // Gold, Silver, Platinum, Palladium ETFs
+    ENERGY: ['USO', 'UNG', 'BNO'],              // WTI Oil, Natural Gas, Brent Oil ETFs
+    AGRICULTURAL: ['WEAT', 'CORN', 'SOYB'],           // Wheat, Corn, Soybean ETFs
+    BASE_METALS: ['CPER', 'REMX'],                   // Copper, Rare Earth Metals ETFs
 };
 export const COMMODITIES_INSTRUMENT_LIST = [
     ...COMMODITIES_WATCHLIST.PRECIOUS,
@@ -205,12 +173,12 @@ export const COMMODITIES_INSTRUMENT_LIST = [
     ...COMMODITIES_WATCHLIST.BASE_METALS,
 ];
 
-// Human-readable display names for commodity instruments (used in UI + AI prompts)
+// Human-readable display names for commodity ETFs (used in UI + AI prompts)
 export const COMMODITIES_DISPLAY_NAMES: Record<string, string> = {
-    XAU: 'Gold', XAG: 'Silver', XPT: 'Platinum', XPD: 'Palladium',
-    OIL: 'WTI Crude Oil', BRENT: 'Brent Crude', NGAS: 'Natural Gas',
-    WHEAT: 'Wheat', CORN: 'Corn', SOY: 'Soybeans', COFFEE: 'Coffee', SUGAR: 'Sugar',
-    COPPER: 'Copper',
+    GLD: 'Gold ETF', SLV: 'Silver ETF', PPLT: 'Platinum ETF', PALL: 'Palladium ETF',
+    USO: 'WTI Oil ETF', UNG: 'Natural Gas ETF', BNO: 'Brent Oil ETF',
+    WEAT: 'Wheat ETF', CORN: 'Corn ETF', SOYB: 'Soybeans ETF',
+    CPER: 'Copper ETF', REMX: 'Rare Earth ETF',
 };
 
 // Helper: get the watchlist for any asset class

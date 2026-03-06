@@ -1945,8 +1945,17 @@ async function fetchSandboxArenaPrices(
 ): Promise<Record<string, { price: number; change24h: number; volume: number; source: string }>> {
   if (assetClass === 'CRYPTO' || tickers.length === 0) return {};
 
+  // Normalise: the AI sometimes returns "HG COPPER" or "CL CRUDE OIL" instead
+  // of just "HG" / "CL". Strip anything after the first whitespace so the
+  // formatEODHDTicker lookup works correctly.
+  const cleanTickers = tickers.map(t => t.trim().split(/\s+/)[0].toUpperCase());
+
   // Map arena tickers → EODHD format
-  const eodhdTickers = tickers.map(t => formatEODHDTicker(t, assetClass));
+  const eodhdTickers = cleanTickers.map(t => formatEODHDTicker(t, assetClass));
+  // Also build a map from EODHD code back to the clean short ticker
+  const eodhdToClean: Record<string, string> = {};
+  cleanTickers.forEach((t, i) => { eodhdToClean[eodhdTickers[i]] = t; });
+
 
   const usage = await checkEODHDUsage();
   if (usage.pct >= EODHD_CRITICAL_THRESHOLD) return {};
@@ -1974,8 +1983,8 @@ async function fetchSandboxArenaPrices(
       for (const item of data) {
         if (!item.code || item.close === 'NA' || item.close === undefined) continue;
         const eodhdCode = item.code;
-        // Reverse-map EODHD code back to arena ticker
-        const arenaTicker = parseEODHDTicker(eodhdCode, assetClass);
+        // Prefer our own eodhdToClean map, fallback to parseEODHDTicker
+        const arenaTicker = eodhdToClean[eodhdCode] ?? parseEODHDTicker(eodhdCode, assetClass);
         const price = parseFloat(item.close);
         if (isNaN(price) || price <= 0) continue;
 
@@ -1985,6 +1994,7 @@ async function fetchSandboxArenaPrices(
           : (parseFloat(item.change_p) || 0);
 
         result[arenaTicker] = { price, change24h, volume: parseFloat(item.volume) || 0, source: `EODHD:${assetClass}` };
+
       }
     } catch (e: any) {
       console.warn(`[EODHD:${assetClass}] Batch fetch failed:`, e.message);
@@ -2388,6 +2398,7 @@ RULES:
 - 8 unique instruments, 4 pools, 2 per pool
 - Each pool must test a DIFFERENT strategy (momentum/dip-hunter/patient/aggressive)
 - For ${assetClass === 'FTSE' ? 'FTSE: consider sector diversification (energy, pharma, financials, consumer)' : assetClass === 'NYSE' ? 'NYSE: consider sector rotation (tech, energy, healthcare, financials)' : 'Commodities: spread across metals, energy, and agriculture categories'}
+- CRITICAL: tokens arrays must contain ONLY the SHORT TICKER CODE (e.g. "HG" not "HG COPPER", "CL" not "CL CRUDE OIL"). No descriptions, no spaces, just the ticker symbol as shown in the instrument list above.
 
 Respond with ONLY valid JSON:
 {
