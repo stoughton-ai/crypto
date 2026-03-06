@@ -1,495 +1,781 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-    Trophy, Clock, Zap, Activity, RefreshCw, ChevronDown, ChevronUp, Calendar, Loader2, Wallet, TrendingUp, TrendingDown
-} from "lucide-react";
-import {
-    getArenaStatus, refreshArenaPrices, manualInitArena
-} from "@/app/actions";
-import type {
-    ArenaConfig, ArenaTradeRecord, PoolId,
-} from "@/lib/constants";
-import {
-    ARENA_START_DATE, ARENA_DURATION_DAYS, POOL_COUNT, POOL_BUDGET,
-} from "@/lib/constants";
+import { RefreshCw, ChevronRight, Activity, Zap, Server, ShieldAlert, Shield } from "lucide-react";
+import { getArenaStatus, refreshArenaPrices, manualInitArena, getLatestStrategyReport, getPerformanceHistory, runSandboxArenaCycle, type StrategyReport, type PerformanceHistory } from "@/app/actions";
+import type { ArenaConfig, ArenaTradeRecord, PoolId, AssetClass } from "@/lib/constants";
+import { ARENA_START_DATE, ARENA_DURATION_DAYS, POOL_COUNT, POOL_BUDGET, ARENA_THEME, getCurrencySymbol, SANDBOX_ASSET_CLASSES } from "@/lib/constants";
+import AuditTrail from "@/components/AuditTrail";
+import PerformanceChart from "@/components/PerformanceChart";
+import SandboxBanner from "@/components/SandboxBanner";
+import { useAuth } from "@/context/AuthContext";
 
-// ═══════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
-
-const POOL_COLORS = ['99, 102, 241', '16, 185, 129', '245, 158, 11', '244, 63, 94'];
-
-function getDayNumber(): number {
-    const start = new Date(ARENA_START_DATE).getTime();
-    const now = Date.now();
-    const daysPassed = Math.floor((now - start) / (1000 * 60 * 60 * 24));
-    return Math.max(0, Math.min(daysPassed + 1, ARENA_DURATION_DAYS));
+// ─── Helpers ─────────────────────────────────────────────
+// Note: getDayNumber / getTimeRemaining removed — now computed inside the component
+// from arena.startDate / arena.endDate so each dashboard is fully isolated.
+function fmtPrice(n: number) {
+    if (!n || n <= 0) return '0.00';
+    if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (n >= 1) return n.toFixed(2);
+    const dec = Math.max(2, Math.ceil(-Math.log10(n)) + 2);
+    return n.toFixed(Math.min(dec, 6));
+}
+function fmtPct(n: number) {
+    return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
-function getCurrentWeek(): number {
-    const day = getDayNumber();
-    return Math.min(Math.ceil(day / 7), 4);
+// ─── Mission Control UI Components ─────────────────────────
+function TelemetryBar({ pct, colorClass = 'bg-[#0b5394]' }: { pct: number, colorClass?: string }) {
+    return (
+        <div className="w-full h-1.5 bg-[#272a35] overflow-hidden">
+            <div
+                className={`h-full ${colorClass}`}
+                style={{ width: `${Math.min(pct, 100)}%`, transition: 'width 1s cubic-bezier(0.4, 0, 0.2, 1)' }}
+            />
+        </div>
+    );
 }
 
-function getTimeRemaining(): string {
-    const end = new Date(ARENA_START_DATE).getTime() + ARENA_DURATION_DAYS * 24 * 60 * 60 * 1000;
-    const diff = end - Date.now();
-    if (diff <= 0) return 'ended';
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return `${days}d ${hours}h`;
+function StatusIndicator({ status }: { status: 'nominal' | 'warning' | 'critical' }) {
+    const labels = { nominal: 'NOMINAL', warning: 'WARNING', critical: 'CRITICAL' };
+    return (
+        <div className={`flex items-center gap-1.5 status-${status} font-mono text-[10px] uppercase font-bold`}>
+            <span className={`dot dot-${status} scale-75`}></span>
+            {labels[status]}
+        </div>
+    );
 }
 
-function smartPrice(price: number): string {
-    if (!price || price <= 0) return "0";
-    if (price >= 1) return price.toFixed(2);
-    const decimals = Math.max(2, Math.ceil(-Math.log10(price)) + 3);
-    return price.toFixed(Math.min(decimals, 8));
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─── Main export ─────────────────────────────────────────
 interface ArenaDashboardProps {
-    userId: string;
+    userId?: string;       // Optional: resolved from AuthContext if not passed
+    assetClass?: AssetClass; // Defaults to CRYPTO
 }
 
-export default function ArenaDashboard({ userId }: ArenaDashboardProps) {
+export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPTO' }: ArenaDashboardProps) {
+    const { user, loading: authLoading } = useAuth();
+    const userId = userIdProp || user?.uid || '';
+    const isNonCryptoClass = SANDBOX_ASSET_CLASSES.includes(assetClass);
+    const theme = ARENA_THEME[assetClass];
+    const currency = getCurrencySymbol(assetClass);
+
     const [arena, setArena] = useState<ArenaConfig | null>(null);
     const [trades, setTrades] = useState<ArenaTradeRecord[]>([]);
     const [prices, setPrices] = useState<Record<string, { price: number; change24h: number }>>({});
     const [eodhd, setEodhd] = useState<{ used: number; limit: number; pct: number }>({ used: 0, limit: 80000, pct: 0 });
-    const [marketStats, setMarketStats] = useState<any>(null);
+    const [market, setMarket] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [initializing, setInitializing] = useState(false);
-    const [expandedPool, setExpandedPool] = useState<PoolId | null>(null);
-    const [showTrades, setShowTrades] = useState(false);
+    const [activePool, setActivePool] = useState<PoolId | null>(null);
+    const [tick, setTick] = useState(0);
+    const [isInitializing, setIsInitializing] = useState(false);
+    const [strategyReport, setStrategyReport] = useState<StrategyReport | null>(null);
+    const [performanceHistory, setPerformanceHistory] = useState<PerformanceHistory | null>(null);
+    const [ledgerPage, setLedgerPage] = useState(0);
+    const [showAuditTrail, setShowAuditTrail] = useState(false);
+    const TRADES_PER_PAGE = 8;
 
-    // Load data
+    // Live timer tick
+    useEffect(() => {
+        const i = setInterval(() => setTick(t => t + 1), 1000);
+        return () => clearInterval(i);
+    }, []);
+
     const loadData = useCallback(async () => {
         try {
-            const [status, freshPrices] = await Promise.all([
-                getArenaStatus(userId),
-                refreshArenaPrices(userId),
+            const [status, freshPrices, report] = await Promise.all([
+                getArenaStatus(userId, assetClass),
+                refreshArenaPrices(userId, assetClass),
+                getLatestStrategyReport(userId, assetClass),
             ]);
             setArena(status.arena);
             setTrades(status.trades);
-            setMarketStats(status.marketStats);
+            setMarket(status.marketStats);
             setEodhd(status.eodhd);
+            if (report) setStrategyReport(report);
             setPrices(freshPrices);
+            // Fetch performance history (passes live prices to avoid a second fetch)
+            const history = await getPerformanceHistory(userId, freshPrices, assetClass);
+            if (history) setPerformanceHistory(history);
         } catch (e) {
-            console.error('Failed to load arena data:', e);
+            console.error(e);
         } finally {
             setLoading(false);
         }
-    }, [userId]);
+    }, [userId, assetClass]);
 
     useEffect(() => { loadData(); }, [loadData]);
-
-    // Auto-refresh every 30s
     useEffect(() => {
-        const interval = setInterval(loadData, 30000);
-        return () => clearInterval(interval);
+        const t = setInterval(loadData, 30000);
+        return () => clearInterval(t);
     }, [loadData]);
 
-    const handleRefresh = async () => {
-        setRefreshing(true);
-        await loadData();
-        setRefreshing(false);
-    };
-
-    const handleInitialize = async () => {
-        setInitializing(true);
-        const result = await manualInitArena(userId);
-        if (result.success) {
-            await loadData();
-        }
-        setInitializing(false);
-    };
-
-    // Calculate totals
     const poolValues = useMemo(() => {
         if (!arena) return [];
         return arena.pools.map((pool, idx) => {
-            let holdingsValue = 0;
-            for (const [ticker, holding] of Object.entries(pool.holdings)) {
-                const price = prices[ticker.toUpperCase()]?.price || holding.averagePrice;
-                holdingsValue += holding.amount * price;
+            let holdVal = 0;
+            for (const [t, h] of Object.entries(pool.holdings)) {
+                holdVal += h.amount * (prices[t.toUpperCase()]?.price || h.averagePrice);
             }
-            const totalValue = pool.cashBalance + holdingsValue;
-            const pnl = totalValue - pool.budget;
+            const total = pool.cashBalance + holdVal;
+            const pnl = total - pool.budget;
             const pnlPct = pool.budget > 0 ? (pnl / pool.budget) * 100 : 0;
-            return { ...pool, totalValue, pnl, pnlPct, colorRgb: POOL_COLORS[idx] };
+            return { ...pool, total, pnl, pnlPct, idx };
         });
     }, [arena, prices]);
 
-    const totalValue = poolValues.reduce((sum, p) => sum + p.totalValue, 0);
-    const totalBudget = POOL_COUNT * POOL_BUDGET;
-    const totalPnl = totalValue - totalBudget;
-    const totalPnlPct = totalBudget > 0 ? (totalPnl / totalBudget) * 100 : 0;
+    const totalValue = poolValues.reduce((s, p) => s + p.total, 0);
+    const totalPnl = totalValue - POOL_COUNT * POOL_BUDGET;
+    const totalPnlPct = (totalPnl / (POOL_COUNT * POOL_BUDGET)) * 100;
+    const leaderIdx = poolValues.reduce((b, p, i) => p.pnlPct > (poolValues[b]?.pnlPct ?? -Infinity) ? i : b, 0);
 
-    const leaderIdx = poolValues.reduce((best, p, i) => p.pnlPct > (poolValues[best]?.pnlPct || -Infinity) ? i : best, 0);
+    // ── Arena-scoped clock (fully isolated per arena) ──
+    // isSandbox = true when still in sandbox mode (non-crypto + not yet in competition)
+    // Once competition is activated arena.competitionMode = true → switches to T-minus countdown
+    const isSandbox = isNonCryptoClass && !(arena?.competitionMode);
 
-    if (loading) {
-        return (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-                <Loader2 className="animate-spin text-indigo-400" size={48} />
-                <p className="font-outfit text-indigo-300 text-sm tracking-widest uppercase">Syncing Arena...</p>
+    const arenaStartMs = arena?.startDate ? new Date(arena.startDate).getTime() : 0;
+    const arenaEndMs = arena?.endDate ? new Date(arena.endDate).getTime() : arenaStartMs + ARENA_DURATION_DAYS * 86400000;
+    const arenaDay = arenaStartMs
+        ? Math.max(1, Math.min(Math.floor((Date.now() - arenaStartMs) / 86400000) + 1, ARENA_DURATION_DAYS))
+        : 1;
+    // For sandbox arenas show elapsed days; for live arenas show T-minus to endDate
+    const clockDiff = isSandbox ? (Date.now() - arenaStartMs) : (arenaEndMs - Date.now());
+    const absMs = Math.abs(clockDiff);
+    const cd = Math.floor(absMs / 86400000);
+    const ch = Math.floor((absMs % 86400000) / 3600000);
+    const cm = Math.floor((absMs % 3600000) / 60000);
+    const cs = Math.floor((absMs % 60000) / 1000);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const clockLabel = !arenaStartMs
+        ? '--:--:--:--'
+        : isSandbox
+            ? `${pad(cd)}:${pad(ch)}:${pad(cm)}:${pad(cs)}` // elapsed
+            : clockDiff <= 0 ? '00:00:00:00' : `${pad(cd)}:${pad(ch)}:${pad(cm)}:${pad(cs)}`; // t-minus
+
+    const isMarketFear = (market?.fearGreedIndex ?? 50) < 40;
+
+    const isApiCritical = eodhd.pct > 0.9;
+
+    /* ── Loading ── */
+    if (loading) return (
+        <div className="flex flex-col items-center justify-center h-64 space-y-4">
+            <div className="mc-label text-[#8a8f98]">ESTABLISHING TELEMETRY LINK...</div>
+            <div className="flex gap-2">
+                <div className="w-2 h-2 bg-[#4ba3e3] animate-ping" />
+                <div className="w-2 h-2 bg-[#4ba3e3] animate-ping delay-75" />
+                <div className="w-2 h-2 bg-[#4ba3e3] animate-ping delay-150" />
             </div>
-        );
+        </div>
+    );
+
+    // ─── AUDIT TRAIL VIEW ─────────────────────────────────────────────────
+    if (showAuditTrail) {
+        return <AuditTrail userId={userId} onBack={() => setShowAuditTrail(false)} assetClass={assetClass} />;
     }
 
-    if (!arena?.initialized) {
-        return (
-            <div className="max-w-lg mx-auto mt-20">
-                {/* Fallback gracefully covered by layout/page, but kept for direct mount */}
-            </div>
-        );
-    }
+    if (!arena?.initialized) return (
+        <div className="mc-panel p-10 text-center border-l-4 border-l-[#ffb74d] max-w-2xl mx-auto mt-20">
+            <div className="mc-label text-[#ffb74d] mb-4 text-lg">SYSTEM HALT: ARENA PENDING DEPLOYMENT</div>
+            <p className="font-mono text-sm text-[#e2e4e9] mb-8 leading-relaxed">
+                The Semaphore Arena is currently awaiting initialization. Proceeding will trigger AI to generate 4 distinct trading strategies, allocate the $600 baseline capital, and immediately deploy the funds into real-market execution.
+            </p>
+            <button
+                onClick={async () => {
+                    setIsInitializing(true);
+                    try {
+                        const res = await manualInitArena(userId, assetClass);
+                        if (res.success) {
+                            await loadData();
+                        } else {
+                            alert(res.message);
+                        }
+                    } catch (e: any) {
+                        alert(e.message);
+                    } finally {
+                        setIsInitializing(false);
+                    }
+                }}
+                disabled={isInitializing}
+                className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-8 py-3 font-mono text-sm font-bold tracking-widest uppercase transition-colors disabled:opacity-50"
+            >
+                {isInitializing ? "DEPLOYING AI STRATEGIES..." : "INITIALIZE ARENA // AUTO-DEPLOY"}
+            </button>
+            {isInitializing && (
+                <div className="mt-6 flex justify-center gap-2">
+                    <span className="dot dot-nominal"></span>
+                    <span className="mc-label text-[10px] text-[#4caf50]">UPLINKING TO GEMINI ARCHITECT...</span>
+                </div>
+            )}
+        </div>
+    );
 
     return (
-        <div className="space-y-8 animate-fade-in">
-            {/* ── HEADER & GLOBAL STATS ────────────────────────────────────── */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="space-y-4">
 
-                {/* Main Value Card */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="premium-glass p-8 rounded-[2rem] lg:col-span-2 relative overflow-hidden flex flex-col justify-between"
-                >
-                    <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-indigo-500/10 rounded-full blur-[100px] pointer-events-none translate-x-1/2 -translate-y-1/2" />
+            {/* Sandbox banner — shown for FTSE, NYSE, Commodities */}
+            {isSandbox && (
+                <SandboxBanner
+                    assetClass={assetClass}
+                    onCycleComplete={loadData}
+                    onActivateCompetition={async () => {
+                        try {
+                            const { activateSandboxCompetition } = await import('@/app/actions');
+                            await activateSandboxCompetition(userId, assetClass);
+                            await loadData();
+                        } catch (e: any) { alert(e.message); }
+                    }}
+                />
+            )}
 
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <div className="text-xs font-black font-outfit text-slate-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-                                <Activity size={12} className="text-indigo-400" />
-                                Arena Net Value
+            {/* ═ GLOBAL MISSION STATUS ═ */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+
+                {/* Main PNL Block */}
+                <div className="mc-panel md:col-span-4 p-5 flex flex-col justify-between">
+                    <div className="flex justify-between items-start mb-4">
+                        <span className="mc-label">Net Asset Value (NAV)</span>
+                        <StatusIndicator status={totalPnl >= 0 ? 'nominal' : 'critical'} />
+                    </div>
+                    <div className="flex items-baseline gap-4">
+                        <span className="mc-value text-4xl font-bold tracking-tight text-white">{currency}{fmtPrice(totalValue)}</span>
+                        <span className={`mc-value text-lg ${totalPnl >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                            {fmtPct(totalPnlPct)}
+                        </span>
+                    </div>
+                    <div className="mc-divider my-4" />
+                    <div className="flex justify-between items-center">
+                        <span className="mc-label">BASE LINE CAPITAL</span>
+                        <span className="mc-value text-sm text-[#8a8f98]">{currency}{(POOL_COUNT * POOL_BUDGET).toFixed(2)}</span>
+                    </div>
+                </div>
+
+                {/* Telemetry Grid — Panel 1 & 2 are asset-class aware */}
+                <div className="grid grid-cols-2 gap-4 md:col-span-5">
+
+                    {/* Panel 1: BTC Oracle (crypto) | Top Holding (others) */}
+                    {assetClass === 'CRYPTO' ? (
+                        <div className="mc-panel p-4 flex flex-col justify-between">
+                            <div className="mc-label mb-2 flex justify-between">
+                                BTC ORACLE <StatusIndicator status={prices['BTC']?.change24h >= 0 ? 'nominal' : 'warning'} />
                             </div>
-                            <div className="text-5xl font-black font-mono text-white tracking-tight">
-                                ${totalValue.toFixed(2)}
+                            <div className="mc-value text-2xl text-white mb-1">${fmtPrice(prices['BTC']?.price ?? 0)}</div>
+                            <div className={`mc-value text-xs ${prices['BTC']?.change24h >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                {fmtPct(prices['BTC']?.change24h ?? 0)} 24H
                             </div>
                         </div>
-                        <button onClick={handleRefresh} className="p-3 bg-white/5 rounded-2xl text-slate-400 hover:text-white hover:bg-white/10 transition-all" disabled={refreshing}>
-                            <RefreshCw size={20} className={refreshing ? 'animate-spin' : ''} />
-                        </button>
+                    ) : (() => {
+                        // Find best-performing holding across all pools
+                        let bestTicker = '', bestPct = -Infinity;
+                        arena?.pools.forEach(p => {
+                            Object.entries(p.holdings || {}).forEach(([t, h]) => {
+                                const liveP = prices[t.toUpperCase()]?.price;
+                                if (!liveP || !h.averagePrice) return;
+                                const pct = ((liveP - h.averagePrice) / h.averagePrice) * 100;
+                                if (pct > bestPct) { bestPct = pct; bestTicker = t; }
+                            });
+                        });
+                        const bpData = bestTicker ? prices[bestTicker.toUpperCase()] : null;
+                        return (
+                            <div className="mc-panel p-4 flex flex-col justify-between">
+                                <div className="mc-label mb-2 flex justify-between">
+                                    TOP HOLDING <StatusIndicator status={bestPct >= 0 ? 'nominal' : 'warning'} />
+                                </div>
+                                <div className="mc-value text-2xl text-white mb-1 truncate">
+                                    {bestTicker || '—'}
+                                </div>
+                                <div className={`mc-value text-xs ${bestPct >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                    {bestTicker ? `${fmtPct(bestPct)} vs cost` : 'No positions'}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    {/* Panel 2: Sentiment/Fear-Greed (crypto) | Win Rate (others) */}
+                    {assetClass === 'CRYPTO' ? (
+                        <div className="mc-panel p-4 flex flex-col justify-between">
+                            <div className="mc-label mb-2 flex justify-between">
+                                SENTIMENT <StatusIndicator status={isMarketFear ? 'warning' : 'nominal'} />
+                            </div>
+                            <div className="mc-value text-2xl text-white mb-1">{market?.fearGreedIndex ?? '—'}</div>
+                            <div className="mc-value text-xs text-[#d32f2f] uppercase">
+                                {market?.fearGreedStatus ?? 'UNKNOWN'}
+                            </div>
+                        </div>
+                    ) : (() => {
+                        const sells = trades.filter(t => t.type === 'SELL');
+                        const wins = sells.filter(t => (t.pnlPct ?? 0) > 0).length;
+                        const winRate = sells.length > 0 ? (wins / sells.length) * 100 : null;
+                        const status = winRate === null ? 'nominal' : winRate >= 50 ? 'nominal' : 'warning';
+                        return (
+                            <div className="mc-panel p-4 flex flex-col justify-between">
+                                <div className="mc-label mb-2 flex justify-between">
+                                    WIN RATE <StatusIndicator status={status} />
+                                </div>
+                                <div className="mc-value text-2xl text-white mb-1">
+                                    {winRate !== null ? `${winRate.toFixed(0)}%` : '—'}
+                                </div>
+                                <div className="mc-value text-xs text-[#8a8f98]">
+                                    {wins}W / {sells.length - wins}L of {sells.length} closed
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    <div className="mc-panel p-4 flex flex-col justify-between">
+                        <div className="mc-label mb-2 flex justify-between">
+                            API QUOTA <StatusIndicator status={isApiCritical ? 'critical' : 'nominal'} />
+                        </div>
+                        <div className="mc-value text-2xl text-white mb-1">{((eodhd.pct || 0) * 100).toFixed(1)}%</div>
+                        <TelemetryBar pct={(eodhd.pct || 0) * 100} colorClass={isApiCritical ? 'bg-red-500' : 'bg-[#0b5394]'} />
+                        <div className="mc-value text-[10px] text-[#8a8f98] mt-2 text-right">
+                            {eodhd.used.toLocaleString()} / {eodhd.limit.toLocaleString()} REQ
+                        </div>
                     </div>
 
-                    <div className="flex items-end gap-8">
-                        <div>
-                            <div className="text-xs font-bold font-outfit text-slate-500 uppercase tracking-widest mb-1">Total P&L</div>
-                            <div className={`text-2xl font-black font-mono ${totalPnl >= 0 ? 'text-positive' : 'text-negative'}`}>
-                                {totalPnl >= 0 ? '+' : ''}{totalPnlPct.toFixed(1)}%
-                            </div>
-                            <div className={`text-sm font-mono font-medium ${totalPnl >= 0 ? 'text-emerald-400/80' : 'text-rose-400/80'}`}>
-                                {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
-                            </div>
+                    <div className="mc-panel p-4 flex flex-col justify-between">
+                        <div className="mc-label mb-2 flex justify-between">
+                            EXECUTIONS <StatusIndicator status="nominal" />
                         </div>
-
-                        <div className="w-px h-12 bg-white/10" />
-
-                        <div>
-                            <div className="text-xs font-bold font-outfit text-slate-500 uppercase tracking-widest mb-1">Leader</div>
-                            <div className="text-xl font-bold font-outfit text-white flex items-center gap-2">
-                                <span>{poolValues[leaderIdx]?.emoji}</span>
-                                {poolValues[leaderIdx]?.name}
-                            </div>
-                            <div className="text-emerald-400 text-sm font-mono font-medium">
-                                +{poolValues[leaderIdx]?.pnlPct.toFixed(1)}%
-                            </div>
+                        <div className="mc-value text-2xl text-white mb-1">{trades.length}</div>
+                        <div className="flex items-center gap-2 mt-auto">
+                            <span className="px-1.5 py-0.5 bg-[#1b5e20] text-[#a5d6a7] font-mono text-[9px] font-bold">B: {trades.filter(t => t.type === 'BUY').length}</span>
+                            <span className="px-1.5 py-0.5 bg-[#b71c1c] text-[#ef9a9a] font-mono text-[9px] font-bold">S: {trades.filter(t => t.type === 'SELL').length}</span>
                         </div>
                     </div>
-                </motion.div>
+                </div>
 
-                {/* Status Column */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 }}
-                    className="flex flex-col gap-6"
-                >
-                    {/* Time block */}
-                    <div className="premium-glass p-6 rounded-[2rem] flex flex-col justify-center items-center text-center h-full relative overflow-hidden group">
-                        <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-emerald-500/5 opacity-50 group-hover:opacity-100 transition-opacity" />
-                        <Calendar size={24} className="text-indigo-400 mb-3" />
-                        <div className="text-sm font-outfit text-slate-400 uppercase tracking-widest mb-1">Day {getDayNumber()} of {ARENA_DURATION_DAYS}</div>
-                        <div className="text-2xl font-black font-mono text-white">{getTimeRemaining()} left</div>
-                    </div>
-
-                    {/* Market Stats */}
-                    {marketStats && (
-                        <div className="premium-glass p-6 rounded-[2rem] flex flex-col justify-center h-full">
-                            <div className="flex justify-between items-center mb-4">
-                                <span className="text-xs font-outfit text-slate-500 uppercase tracking-widest">BTC Price</span>
-                                <span className="text-lg font-mono font-bold text-white">${(prices['BTC']?.price || 0).toLocaleString()}</span>
-                            </div>
-                            <div className="w-full h-px bg-white/5 mb-4" />
-                            <div className="flex justify-between items-center">
-                                <span className="text-xs font-outfit text-slate-500 uppercase tracking-widest">F&amp;G Index</span>
-                                <span className={`text-lg font-mono font-bold ${marketStats.fearGreedIndex > 50 ? 'text-positive' : 'text-negative'}`}>
-                                    {marketStats.fearGreedIndex} <span className="text-xs ml-1 opacity-70">({marketStats.fearGreedStatus})</span>
-                                </span>
-                            </div>
+                {/* Mission Clock */}
+                <div className="mc-panel md:col-span-3 p-4 flex flex-col justify-between border-l-4 border-l-[#0b5394]">
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="mc-label flex flex-col gap-0.5 leading-none">
+                            <span>MISSION CLOCK</span>
+                            <span className="text-[9px] opacity-60 font-mono">{isSandbox ? '(ELAPSED)' : '(T-MINUS)'}</span>
                         </div>
-                    )}
-                </motion.div>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setShowAuditTrail(true)}
+                                className="flex items-center gap-1.5 px-2.5 py-1 border border-[#272a35] hover:border-[#ffb74d] text-[#8a8f98] hover:text-[#ffb74d] transition-colors"
+                                title="View AI Audit Trail"
+                            >
+                                <Shield size={12} />
+                                <span className="font-mono text-[9px] font-bold tracking-widest hidden sm:inline">AUDIT</span>
+                            </button>
+                            {/* Manual cycle trigger — visible for all non-crypto arenas */}
+                            {isNonCryptoClass && (
+                                <button
+                                    onClick={async () => {
+                                        if (!userId || refreshing) return;
+                                        setRefreshing(true);
+                                        try {
+                                            await runSandboxArenaCycle(userId, assetClass);
+                                            await loadData();
+                                        } catch (e: any) {
+                                            console.error('[RunCycle]', e.message);
+                                        } finally {
+                                            setRefreshing(false);
+                                        }
+                                    }}
+                                    disabled={refreshing}
+                                    title="Manually run one AI trading cycle now (bypasses cron schedule)"
+                                    className={`px-2 py-1 border font-mono text-[9px] font-bold tracking-widest transition-colors ${refreshing
+                                            ? 'border-[#272a35] text-[#4ba3e3] opacity-60'
+                                            : 'border-[#0b5394] text-[#4ba3e3] hover:border-[#4ba3e3] hover:bg-[#0b5394]/20'
+                                        }`}
+                                >
+                                    {refreshing ? '⏳' : '▶ RUN'}
+                                </button>
+                            )}
+                            <button
+                                onClick={() => { setRefreshing(true); loadData().then(() => setRefreshing(false)); }}
+                                disabled={refreshing}
+                                className={`p-1.5 hover:bg-[#272a35] rounded ${refreshing ? 'animate-spin text-[#4ba3e3]' : 'text-[#8a8f98]'}`}
+                            >
+                                <RefreshCw size={14} />
+                            </button>
+                        </div>
+                    </div>
+                    <div className="mc-value text-3xl font-bold tracking-wider text-white bg-[#0a0a0c] px-3 py-2 border border-[#272a35] text-center shadow-inner">
+                        {clockLabel}
+                    </div>
+                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-[#272a35]">
+                        <span className="mc-label">{isSandbox ? 'ELAPSED' : 'CYCLE PHASE'}</span>
+                        {isSandbox
+                            ? <span className="mc-value text-sm text-[#f59e0b] font-bold tracking-widest">SANDBOX</span>
+                            : <span className="mc-value text-sm text-[#4ba3e3]">DAY {arenaDay} / {ARENA_DURATION_DAYS}</span>
+                        }
+                    </div>
+                </div>
+
             </div>
 
-            {/* ── API BUDGET BAR ─────────────────────────────────────────── */}
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="premium-glass p-4 rounded-2xl flex items-center gap-6"
-            >
-                <div className="text-xs font-black font-outfit text-slate-500 uppercase tracking-[0.2em] whitespace-nowrap">
-                    Oracle Bandwidth
-                </div>
-                <div className="flex-grow h-2 bg-black/40 rounded-full overflow-hidden inset-shadow-sm">
-                    <div
-                        className="h-full rounded-full transition-all duration-1000 ease-out relative"
-                        style={{
-                            width: `${Math.min(eodhd.pct * 100, 100)}%`,
-                            background: eodhd.pct > 0.9 ? 'linear-gradient(90deg, #f43f5e, #be123c)' : eodhd.pct > 0.75 ? 'linear-gradient(90deg, #f59e0b, #b45309)' : 'linear-gradient(90deg, #10b981, #047857)',
-                        }}
-                    >
-                        <div className="absolute inset-0 bg-white/20 w-full animate-[pulse_2s_ease-in-out_infinite]" />
-                    </div>
-                </div>
-                <div className="text-xs font-mono font-medium text-slate-400 whitespace-nowrap">
-                    {eodhd.used.toLocaleString()} / {eodhd.limit.toLocaleString()} <span className="text-slate-600">({(eodhd.pct * 100).toFixed(1)}%)</span>
-                </div>
-            </motion.div>
+            {/* ═ STRATEGY MODULES ═ */}
+            <div className="mc-label flex items-center gap-3 pt-4">
+                <span>STRATEGY DEPLOYMENT TELEMETRY</span>
+                <div className="h-px bg-[#272a35] flex-1"></div>
+            </div>
 
-            {/* ── POOL CARDS ──────────────────────────────────────────── */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {poolValues.map((pool, idx) => {
-                    const isLeader = idx === leaderIdx;
-                    const isExpanded = expandedPool === pool.poolId;
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {poolValues.map((pool, i) => {
+                    const isLeader = i === leaderIdx;
+                    const isActive = activePool === pool.poolId;
+                    const badgeColor = `pool-badge-${pool.idx}`;
+                    const isProfitable = pool.pnlPct >= 0;
 
                     return (
-                        <motion.div
-                            key={pool.poolId}
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ delay: 0.1 * idx }}
-                            style={{ '--pool-color': pool.colorRgb } as any}
-                            className={`premium-glass rounded-[2rem] pool-card-container cursor-pointer ${isLeader ? 'leader-card-bg' : ''}`}
-                            onClick={() => setExpandedPool(isExpanded ? null : pool.poolId)}
-                        >
-                            {isLeader && <div className="leader-glow-ring" />}
+                        <div key={pool.poolId} className={`mc-panel ${isLeader ? 'border-[#4ba3e3] shadow-[0_0_15px_rgba(75,163,227,0.1)]' : ''}`}>
+                            {/* Header */}
+                            <div className="mc-panel-header">
+                                <div className="flex items-center gap-2">
+                                    <span className={`px-2 py-0.5 font-bold ${badgeColor}`}>SQ-{pool.idx + 1}</span>
+                                    <span className="text-white">{pool.name.toUpperCase()}</span>
+                                    <span className="text-[#8a8f98]">{pool.emoji}</span>
+                                </div>
+                                {isLeader && <span className="text-black bg-[#ffb74d] px-2 font-bold uppercase tracking-widest">LEADER</span>}
+                                {pool.status === 'PAUSED' && <span className="text-white bg-[#d32f2f] px-2 font-bold uppercase tracking-widest animate-pulse">HALTED</span>}
+                            </div>
 
-                            <div className="p-8">
-                                {/* Pool header */}
-                                <div className="flex justify-between items-start mb-8">
+                            {/* Core Stats Row */}
+                            <div
+                                className="p-5 cursor-pointer hover:bg-[#161b22] transition-colors"
+                                onClick={() => setActivePool(isActive ? null : pool.poolId)}
+                            >
+                                <div className="flex justify-between items-end mb-4">
                                     <div>
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shadow-lg border border-white/10" style={{ background: `rgba(var(--pool-color), 0.15)` }}>
-                                                {pool.emoji}
-                                            </div>
-                                            <div>
-                                                <h3 className="text-xl font-black font-outfit text-white flex items-center gap-2">
-                                                    {pool.name}
-                                                    {isLeader && (
-                                                        <span className="px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-300 text-[9px] font-black font-outfit uppercase tracking-[0.2em] shadow-[0_0_10px_rgba(245,158,11,0.3)]">
-                                                            Leader
-                                                        </span>
-                                                    )}
-                                                </h3>
-                                                <div className="flex items-center gap-2 mt-1">
-                                                    <span className="text-xs font-mono text-slate-400 px-2 py-0.5 rounded bg-black/30 border border-white/5">
-                                                        {pool.tokens.join(' • ')}
-                                                    </span>
-                                                    {pool.status === 'PAUSED' && (
-                                                        <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 text-[10px] font-bold">
-                                                            HALTED
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
+                                        <div className="mc-label mb-1">ASSET VALUE</div>
+                                        <div className="mc-value text-2xl font-bold text-white">${fmtPrice(pool.total)}</div>
                                     </div>
                                     <div className="text-right">
-                                        <div className="text-3xl font-black font-mono text-white mb-1">
-                                            ${pool.totalValue.toFixed(2)}
-                                        </div>
-                                        <div className={`text-base font-bold font-mono ${pool.pnl >= 0 ? 'text-positive' : 'text-negative'}`}>
-                                            {pool.pnl >= 0 ? '+' : ''}{pool.pnlPct.toFixed(1)}%
+                                        <div className="mc-label mb-1">DELTA</div>
+                                        <div className={`mc-value text-lg font-bold ${isProfitable ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                            {fmtPct(pool.pnlPct)}
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Holdings */}
-                                <div className="space-y-3 mb-6">
-                                    {pool.tokens.map(ticker => {
-                                        const holding = pool.holdings[ticker];
-                                        const price = prices[ticker.toUpperCase()]?.price || 0;
-                                        const change = prices[ticker.toUpperCase()]?.change24h || 0;
+                                {/* Progress bar representing budget vs value */}
+                                <div className="mb-5">
+                                    <div className="flex justify-between mb-1">
+                                        <span className="mc-value text-[10px] text-[#8a8f98]">BUDGET: ${pool.budget}</span>
+                                        <span className="mc-value text-[10px] text-[#8a8f98]">LIQUID: ${pool.cashBalance.toFixed(2)}</span>
+                                    </div>
+                                    <TelemetryBar pct={(pool.total / pool.budget) * 100} colorClass={isProfitable ? 'bg-[#2e7d32]' : 'bg-[#d32f2f]'} />
+                                </div>
 
+                                {/* Asset Table */}
+                                <div className="border border-[#272a35] bg-[#0a0a0c]">
+                                    {/* Table Header */}
+                                    <div className="grid grid-cols-4 px-3 py-2 border-b border-[#272a35] mc-label text-[9px]">
+                                        <div className="col-span-1">ASSET</div>
+                                        <div className="col-span-1 text-right">QTY</div>
+                                        <div className="col-span-1 text-right">PRICE</div>
+                                        <div className="col-span-1 text-right">24H </div>
+                                    </div>
+
+                                    {/* Table Rows */}
+                                    {pool.tokens.map((ticker, rowIdx) => {
+                                        const pr = prices[ticker.toUpperCase()];
+                                        const holding = pool.holdings[ticker];
+                                        const chg = pr?.change24h ?? 0;
                                         return (
-                                            <div key={ticker} className="flex items-center justify-between py-3 px-4 rounded-xl bg-black/20 border border-white/5 backdrop-blur-sm">
-                                                <div className="flex items-center gap-3">
-                                                    <span className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-xs font-black font-outfit text-white border border-white/10 shadow-inner">
-                                                        {ticker.substring(0, 2)}
-                                                    </span>
-                                                    <div>
-                                                        <div className="text-sm font-bold font-outfit text-white">{ticker}</div>
-                                                        <div className={`text-[11px] font-mono font-bold mt-0.5 ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                            {change >= 0 ? '+' : ''}{change.toFixed(2)}%
-                                                        </div>
-                                                    </div>
+                                            <div key={ticker} className={`grid grid-cols-4 px-3 py-2 items-center mc-value text-xs ${rowIdx !== pool.tokens.length - 1 ? 'border-b border-[#272a35]' : ''}`}>
+                                                <div className="col-span-1 font-bold text-[#e2e4e9]">{ticker}</div>
+                                                <div className="col-span-1 text-right text-[#8a8f98]">
+                                                    {holding ? holding.amount.toFixed(4) : '--'}
                                                 </div>
-                                                <div className="text-right">
-                                                    <div className="text-sm font-mono font-medium text-slate-200">${smartPrice(price)}</div>
-                                                    {holding ? (
-                                                        <div className="text-xs font-mono text-slate-500 mt-0.5">
-                                                            {holding.amount.toFixed(4)} <span className="opacity-50">held</span>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="text-xs font-mono text-slate-600 mt-0.5 italic">Awaiting entry</div>
-                                                    )}
+                                                <div className="col-span-1 text-right text-white">
+                                                    ${fmtPrice(pr?.price ?? 0)}
+                                                </div>
+                                                <div className={`col-span-1 text-right font-bold ${chg >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                                    {chg >= 0 ? '+' : ''}{chg.toFixed(1)}%
                                                 </div>
                                             </div>
                                         );
                                     })}
                                 </div>
 
-                                {/* Stats row */}
-                                <div className="flex items-center justify-between text-[11px] font-mono font-medium text-slate-400 pt-4 border-t border-white/5">
-                                    <span className="flex items-center gap-1.5"><Wallet size={12} /> ${pool.cashBalance.toFixed(2)} Cash</span>
-                                    <span className="px-2 py-1 rounded bg-black/20">{pool.performance.winCount}W / {pool.performance.lossCount}L</span>
-                                    <span>{pool.performance.totalTrades} Executions</span>
+                                <div className="flex justify-center mt-3">
+                                    <ChevronRight size={16} className={`text-[#8a8f98] transition-transform ${isActive ? 'rotate-90' : ''}`} />
                                 </div>
                             </div>
 
-                            {/* Expanded details */}
-                            <AnimatePresence>
-                                {isExpanded && (
-                                    <motion.div
-                                        initial={{ height: 0, opacity: 0 }}
-                                        animate={{ height: 'auto', opacity: 1 }}
-                                        exit={{ height: 0, opacity: 0 }}
-                                        className="overflow-hidden bg-black/20"
-                                    >
-                                        <div className="p-8 space-y-6 border-t border-white/5">
-                                            {/* Strategy Parameters */}
-                                            <div>
-                                                <div className="text-[10px] font-outfit text-slate-500 uppercase tracking-[0.15em] mb-2 flex items-center gap-2">
-                                                    <Zap size={12} className="text-indigo-400" /> Operational Directives
-                                                </div>
-                                                <p className="text-sm font-outfit text-slate-300 leading-relaxed bg-white/5 p-4 rounded-xl border border-white/5">
-                                                    {pool.strategy.description}
-                                                </p>
-                                            </div>
+                            {/* Expansion Panel */}
+                            {isActive && (
+                                <div className="border-t border-[#272a35] bg-[#0a0a0c] p-5">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <div className="mc-label mb-2 border-b border-[#272a35] pb-1">OPERATIONAL DIRECTIVE</div>
+                                            <p className="font-sans text-xs text-[#b0b4bc] leading-relaxed">
+                                                {pool.strategy.description}
+                                            </p>
 
-                                            <div className="grid grid-cols-3 gap-3">
-                                                <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-center flex flex-col justify-center">
-                                                    <div className="text-xl font-black font-mono text-emerald-400">{pool.strategy.buyScoreThreshold}</div>
-                                                    <div className="text-[10px] font-outfit text-slate-500 tracking-wider uppercase mt-1">Buy Score</div>
-                                                </div>
-                                                <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-center flex flex-col justify-center">
-                                                    <div className="text-xl font-black font-mono text-amber-400">{pool.strategy.exitThreshold}</div>
-                                                    <div className="text-[10px] font-outfit text-slate-500 tracking-wider uppercase mt-1">Exit Score</div>
-                                                </div>
-                                                <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-center flex flex-col justify-center">
-                                                    <div className="text-xl font-black font-mono text-rose-400">{pool.strategy.positionStopLoss}%</div>
-                                                    <div className="text-[10px] font-outfit text-slate-500 tracking-wider uppercase mt-1">Stop Loss</div>
-                                                </div>
-                                            </div>
-
-                                            {/* Selection reasoning */}
                                             {pool.selectionReasoning && (
-                                                <div>
-                                                    <div className="text-[10px] font-outfit text-slate-500 uppercase tracking-[0.15em] mb-2">Alpha Logic</div>
-                                                    <p className="text-xs font-mono text-slate-400 leading-relaxed max-h-32 overflow-y-auto custom-scrollbar bg-black/20 p-4 rounded-xl border-l-[3px]" style={{ borderColor: `rgba(var(--pool-color), 0.8)` }}>
+                                                <div className="mt-4">
+                                                    <div className="mc-label mb-2 border-b border-[#272a35] pb-1">AI RATIONALE</div>
+                                                    <div className="font-mono text-[10px] text-[#8a8f98] leading-normal p-3 bg-[#121318] border border-[#272a35] h-32 overflow-y-auto">
                                                         {pool.selectionReasoning}
-                                                    </p>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-                        </motion.div>
+
+                                        <div>
+                                            <div className="mc-label mb-2 border-b border-[#272a35] pb-1">EXECUTION PARAMETERS</div>
+                                            <table className="w-full text-left font-mono text-[11px] text-[#e2e4e9]">
+                                                <tbody>
+                                                    <tr className="border-b border-[#272a35]">
+                                                        <td className="py-2 text-[#8a8f98]">Target Entry</td>
+                                                        <td className="py-2 text-right text-[#4caf50] font-bold">&gt; {pool.strategy.buyScoreThreshold}</td>
+                                                    </tr>
+                                                    <tr className="border-b border-[#272a35]">
+                                                        <td className="py-2 text-[#8a8f98]">Target Exit</td>
+                                                        <td className="py-2 text-right text-[#ffb74d] font-bold">&lt; {pool.strategy.exitThreshold}</td>
+                                                    </tr>
+                                                    <tr className="border-b border-[#272a35]">
+                                                        <td className="py-2 text-[#8a8f98]">Critical Stop</td>
+                                                        <td className="py-2 text-right text-[#ff6659] font-bold">{pool.strategy.positionStopLoss}%</td>
+                                                    </tr>
+                                                    <tr className="border-b border-[#272a35]">
+                                                        <td className="py-2 text-[#8a8f98]">Win/Loss Ratio</td>
+                                                        <td className="py-2 text-right text-white">
+                                                            <span className="text-[#4caf50]">{pool.performance.winCount}</span> / <span className="text-[#ff6659]">{pool.performance.lossCount}</span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     );
                 })}
             </div>
 
-            {/* ── RECENT TRADES ────────────────────────────────────────── */}
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.4 }}
-                className="premium-glass rounded-[2rem] overflow-hidden"
-            >
-                <button
-                    onClick={() => setShowTrades(!showTrades)}
-                    className="w-full p-6 flex justify-between items-center hover:bg-white/5 transition-colors"
-                >
-                    <div className="flex items-center gap-3">
-                        <Activity size={20} className="text-indigo-400" />
-                        <h3 className="text-sm font-black font-outfit text-white uppercase tracking-[0.2em]">
-                            Global Ledger <span className="opacity-50 font-mono ml-2">({trades.length})</span>
-                        </h3>
+            {/* ═ PERFORMANCE GRAPH ═ */}
+            {performanceHistory && (
+                <>
+                    <div className="mc-label flex items-center gap-3 pt-4">
+                        <span>PERFORMANCE GRAPH // NAV &amp; POOL TRAJECTORIES</span>
+                        <div className="h-px bg-[#272a35] flex-1" />
                     </div>
-                    {showTrades ? <ChevronUp size={20} className="text-slate-500" /> : <ChevronDown size={20} className="text-slate-500" />}
-                </button>
+                    <PerformanceChart history={performanceHistory} />
+                </>
+            )}
 
-                <AnimatePresence>
-                    {showTrades && (
-                        <motion.div
-                            initial={{ height: 0 }}
-                            animate={{ height: 'auto' }}
-                            exit={{ height: 0 }}
-                            className="bg-black/20 border-t border-white/5"
-                        >
-                            <div className="p-6 space-y-3 max-h-[32rem] overflow-y-auto custom-scrollbar">
-                                {trades.length === 0 ? (
-                                    <div className="text-center py-10 opacity-50">
-                                        <Activity size={32} className="mx-auto mb-3 opacity-50" />
-                                        <p className="text-sm font-outfit uppercase tracking-widest">Awaiting Initial Executions</p>
-                                    </div>
-                                ) : (
-                                    trades.slice(0, 50).map((trade, i) => (
-                                        <div key={trade.id || i} className="flex items-center justify-between p-4 rounded-xl bg-white/[0.03] hover:bg-white/[0.05] transition-colors border border-white/5">
-                                            <div className="flex items-center gap-4">
-                                                <span className={`w-10 h-10 rounded-full flex items-center justify-center text-sm shadow-lg ${trade.type === 'BUY' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
-                                                    {trade.type === 'BUY' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                                                </span>
-                                                <div>
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <span className="text-sm font-black font-outfit text-white uppercase">{trade.type}</span>
-                                                        <span className="text-sm font-bold font-mono text-slate-300">{trade.ticker}</span>
-                                                    </div>
-                                                    <div className="text-[11px] font-outfit text-slate-500 uppercase tracking-widest">{trade.poolName}</div>
-                                                </div>
-                                            </div>
-                                            <div className="text-right">
-                                                <div className="text-sm font-black font-mono text-white mb-1">
-                                                    ${trade.total.toFixed(2)}
-                                                </div>
-                                                {trade.pnlPct !== undefined ? (
-                                                    <div className={`text-xs font-bold font-mono ${trade.pnlPct >= 0 ? 'text-positive' : 'text-negative'}`}>
-                                                        {trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(1)}%
-                                                    </div>
-                                                ) : (
-                                                    <div className="text-[10px] font-mono text-slate-600">
-                                                        Vol: {trade.amount.toFixed(4)}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))
+            {/* ═ AI STRATEGY INTELLIGENCE REPORT ═ */}
+            {strategyReport && (
+                <>
+                    <div className="mc-label flex items-center gap-3 pt-4">
+                        <span>AI STRATEGY INTELLIGENCE // {strategyReport.reportType} BRIEFING</span>
+                        <div className="h-px bg-[#272a35] flex-1"></div>
+                    </div>
+
+                    <div className="mc-panel">
+                        <div className="mc-panel-header">
+                            <span>{strategyReport.reportType === 'MORNING' ? '☀️ MORNING' : '🌙 EVENING'} BRIEFING</span>
+                            <div className="flex items-center gap-4">
+                                {/* vs BTC benchmark badge */}
+                                {strategyReport.overallVsBtc !== undefined && (
+                                    <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-full border ${strategyReport.overallVsBtc >= 0 ? 'text-[#4caf50] border-[#4caf50]/30 bg-[#4caf50]/10' : 'text-[#ff6659] border-[#ff6659]/30 bg-[#ff6659]/10'}`}>
+                                        {strategyReport.overallVsBtc >= 0 ? '▲' : '▼'} {strategyReport.overallVsBtc >= 0 ? '+' : ''}{strategyReport.overallVsBtc.toFixed(2)}% vs BTC
+                                    </span>
                                 )}
+                                <span className="text-[#8a8f98]">{new Date(strategyReport.generatedAt).toLocaleString()}</span>
                             </div>
-                        </motion.div>
+                        </div>
+
+                        {/* Pool Grades Grid */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-[#0a0a0c]/50 border-b border-[#272a35]">
+                            {strategyReport.poolAnalyses.map((pa) => {
+                                const gradeColor = pa.grade === 'A' ? '#4caf50' : pa.grade === 'B' ? '#8bc34a' : pa.grade === 'C' ? '#ffb74d' : pa.grade === 'D' ? '#ff9800' : '#ff6659';
+                                const vsBtc = pa.vsBtc ?? 0;
+                                const poolStatusColor = pa.pnlPct >= 0 ? '#4caf50' : vsBtc >= -2 ? '#ffb74d' : '#ff6659';
+                                return (
+                                    <div key={pa.poolId} className="bg-white/5 p-3 rounded-xl border border-white/8">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-xs text-[#8a8f98]">{pa.emoji} {pa.poolName}</span>
+                                            <span className="text-xl font-bold font-mono" style={{ color: gradeColor }}>{pa.grade}</span>
+                                        </div>
+                                        <div className="text-xs text-[#e2e4e9] mb-1">{pa.tokens?.join(', ')}</div>
+                                        <div className={`text-sm font-mono font-bold`} style={{ color: poolStatusColor }}>
+                                            ${pa.nav?.toFixed(2)} ({pa.pnlPct >= 0 ? '+' : ''}{pa.pnlPct?.toFixed(2)}%)
+                                        </div>
+                                        {pa.vsBtc !== undefined && (
+                                            <div className={`text-[10px] font-mono mt-0.5 ${vsBtc >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                                {vsBtc >= 0 ? '▲' : '▼'} {vsBtc >= 0 ? '+' : ''}{vsBtc.toFixed(2)}% vs BTC
+                                            </div>
+                                        )}
+                                        <div className="text-[10px] text-[#8a8f98] mt-1">{pa.trades} trades ({pa.wins}W/{pa.losses}L)</div>
+                                        <div className="text-[10px] text-[#adb5c4] mt-2 italic leading-relaxed">{pa.keyInsight}</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* 24h Predictions Table */}
+                        {strategyReport.predictions && strategyReport.predictions.length > 0 && (
+                            <div className="p-4 border-b border-[#272a35]">
+                                <div className="mc-label text-[10px] mb-3">24H TOKEN FORECAST</div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {strategyReport.predictions.map((pred, i) => {
+                                        const biasIcon = pred.bias === 'BULLISH' ? '🟢' : pred.bias === 'NEUTRAL_TO_BULLISH' ? '🔼' : pred.bias === 'NEUTRAL' ? '⬜' : pred.bias === 'NEUTRAL_TO_BEARISH' ? '🔽' : '🔴';
+                                        const biasColor = (pred.bias === 'BULLISH' || pred.bias === 'NEUTRAL_TO_BULLISH') ? '#4caf50' : pred.bias === 'NEUTRAL' ? '#8a8f98' : '#ff6659';
+                                        return (
+                                            <div key={i} className="bg-white/5 rounded-lg p-3 border border-white/8">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="font-mono font-bold text-white text-sm">{biasIcon} {pred.token}</span>
+                                                    <span className="font-mono text-[10px]" style={{ color: biasColor }}>{pred.bias.replace(/_/g, ' ')}</span>
+                                                </div>
+                                                <div className="font-mono text-[11px] text-[#e2e4e9] mb-1">
+                                                    ${pred.priceRangeLow?.toFixed(3)} – ${pred.priceRangeHigh?.toFixed(3)}
+                                                    <span className="text-[#8a8f98] ml-2">| Watch: ${pred.keyLevelToWatch?.toFixed(3)}</span>
+                                                </div>
+                                                <div className="text-[10px] text-[#adb5c4] italic leading-relaxed">{pred.rationale}</div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Analysis & Insights */}
+                        <div className="p-4 space-y-4 text-sm font-mono">
+                            <div>
+                                <div className="mc-label text-[10px] mb-2">COMPARATIVE ANALYSIS</div>
+                                <p className="text-[#e2e4e9] leading-relaxed">{strategyReport.comparativeAnalysis}</p>
+                            </div>
+
+                            <div>
+                                <div className="mc-label text-[10px] mb-2">MARKET OUTLOOK</div>
+                                <p className="text-[#adb5c4] leading-relaxed">{strategyReport.marketOutlook}</p>
+                            </div>
+
+                            {strategyReport.campaignProgress && (
+                                <div className="bg-[#0b5394]/10 border border-[#0b5394]/30 rounded-xl p-3">
+                                    <div className="mc-label text-[10px] text-[#4ba3e3] mb-2">📈 CAMPAIGN TRAJECTORY</div>
+                                    <p className="text-[#adb5c4] text-xs leading-relaxed">{strategyReport.campaignProgress}</p>
+                                </div>
+                            )}
+
+                            {strategyReport.recommendations.length > 0 && (
+                                <div>
+                                    <div className="mc-label text-[10px] mb-2">RECOMMENDATIONS</div>
+                                    <ul className="space-y-1">
+                                        {strategyReport.recommendations.map((r, i) => (
+                                            <li key={i} className="text-[#4ba3e3] flex items-start gap-2">
+                                                <span className="text-[#4caf50] mt-0.5">▸</span>
+                                                <span className="text-[#e2e4e9]">{r}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
+                            {strategyReport.riskAlerts.length > 0 && (
+                                <div className="bg-[#f57c00]/10 border border-[#f57c00]/30 rounded-xl p-3">
+                                    <div className="mc-label text-[10px] text-[#ffb74d] mb-2">⚡ WATCH POINTS</div>
+                                    {strategyReport.riskAlerts.map((r, i) => (
+                                        <p key={i} className="text-[#ffb74d] text-xs">🟡 {r}</p>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="text-[10px] text-[#555] text-right border-t border-[#272a35] pt-3">
+                                Leader: {strategyReport.leaderPool} · Laggard: {strategyReport.laggardPool} · NAV: ${strategyReport.overallNAV?.toFixed(2)}
+                            </div>
+                        </div>
+                    </div>
+                </>
+            )}
+
+
+            {/* ═ EXECUTION LEDGER ═ */}
+            <div className="mc-label flex items-center gap-3 pt-4">
+                <span>EXECUTION LEDGER // RAW FEED</span>
+                <div className="h-px bg-[#272a35] flex-1"></div>
+            </div>
+
+            <div className="mc-panel">
+                <div className="mc-panel-header">
+                    <span>OPERATIONAL LOGS</span>
+                    <span>{trades.length} EVENT(S)</span>
+                </div>
+
+                <div className="bg-[#0a0a0c]">
+                    {trades.length === 0 ? (
+                        <div className="p-8 text-center border-y border-[#272a35]">
+                            <span className="mc-value text-[#8a8f98] text-sm">NO EXECUTIONS RECORDED. MONITORING...</span>
+                        </div>
+                    ) : (
+                        <>
+                            <table className="w-full text-left font-mono text-xs border-collapse">
+                                <thead className="bg-[#121318] border-b border-[#272a35]">
+                                    <tr>
+                                        <th className="py-3 px-4 text-[#8a8f98] font-normal">TIMESTAMP</th>
+                                        <th className="py-3 px-4 text-[#8a8f98] font-normal">TYPE</th>
+                                        <th className="py-3 px-4 text-[#8a8f98] font-normal">ASSET</th>
+                                        <th className="py-3 px-4 text-[#8a8f98] font-normal">UNIT</th>
+                                        <th className="py-3 px-4 text-[#8a8f98] font-normal text-right">TOTAL (USD)</th>
+                                        <th className="py-3 px-4 text-[#8a8f98] font-normal text-right">PNL</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {trades.slice(ledgerPage * TRADES_PER_PAGE, (ledgerPage + 1) * TRADES_PER_PAGE).map((t, i) => {
+                                        const isBuy = t.type === 'BUY';
+                                        const dateStr = new Date(t.date || Date.now()).toISOString().replace('T', ' ').substring(0, 19);
+                                        return (
+                                            <tr key={i} className="border-b border-[#272a35] hover:bg-[#121318] transition-colors">
+                                                <td className="py-3 px-4 text-[#8a8f98]">{dateStr}</td>
+                                                <td className={`py-3 px-4 font-bold ${isBuy ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>{t.type}</td>
+                                                <td className="py-3 px-4 text-white">
+                                                    {t.ticker}
+                                                    <span className="text-[#8a8f98] text-[9px] ml-2 block sm:inline">({t.poolName})</span>
+                                                </td>
+                                                <td className="py-3 px-4 text-[#e2e4e9]">{t.amount.toFixed(4)} @ ${fmtPrice(t.price)}</td>
+                                                <td className="py-3 px-4 text-white text-right font-bold">${t.total.toFixed(2)}</td>
+                                                <td className="py-3 px-4 text-right">
+                                                    {t.pnlPct !== undefined ? (
+                                                        <span className={`font-bold ${t.pnlPct >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                                            {fmtPct(t.pnlPct)}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[#8a8f98]">--</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+
+                            {/* Pagination Controls */}
+                            {trades.length > TRADES_PER_PAGE && (
+                                <div className="flex items-center justify-between px-4 py-3 border-t border-[#272a35] bg-[#121318]">
+                                    <button
+                                        onClick={() => setLedgerPage(p => Math.max(0, p - 1))}
+                                        disabled={ledgerPage === 0}
+                                        className="px-3 py-1.5 font-mono text-xs tracking-wider border border-[#272a35] text-[#8a8f98] hover:text-white hover:border-[#4ba3e3] transition-colors disabled:opacity-30 disabled:hover:text-[#8a8f98] disabled:hover:border-[#272a35]"
+                                    >
+                                        ◄ PREV
+                                    </button>
+                                    <span className="font-mono text-xs text-[#8a8f98]">
+                                        PAGE {ledgerPage + 1} / {Math.ceil(trades.length / TRADES_PER_PAGE)}
+                                    </span>
+                                    <button
+                                        onClick={() => setLedgerPage(p => Math.min(Math.ceil(trades.length / TRADES_PER_PAGE) - 1, p + 1))}
+                                        disabled={ledgerPage >= Math.ceil(trades.length / TRADES_PER_PAGE) - 1}
+                                        className="px-3 py-1.5 font-mono text-xs tracking-wider border border-[#272a35] text-[#8a8f98] hover:text-white hover:border-[#4ba3e3] transition-colors disabled:opacity-30 disabled:hover:text-[#8a8f98] disabled:hover:border-[#272a35]"
+                                    >
+                                        NEXT ►
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
-                </AnimatePresence>
-            </motion.div>
+                </div>
+            </div>
+
         </div>
     );
 }

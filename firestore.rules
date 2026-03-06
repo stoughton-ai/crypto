@@ -1,0 +1,159 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper functions ───────────────────────────────────────────────────────
+
+    // Is the caller signed in?
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Does the calling user own this document?
+    // Used for documents where the doc ID == userId (e.g. virtual_portfolio/{userId})
+    function isOwnerById(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Does the incoming data's userId field match the caller?
+    // Used for flat collections where every document has a userId field.
+    function isOwnerByField() {
+      return isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Does the existing document's userId field match the caller?
+    // Used for reads/updates/deletes on flat collections.
+    function existingOwnerByField() {
+      return isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // ─── Virtual Portfolio ───────────────────────────────────────────────────────
+    // Documents keyed by userId (one document per user).
+
+    match /virtual_portfolio/{userId} {
+      allow read, write: if isOwnerById(userId);
+    }
+
+    // ─── Virtual Portfolio History ────────────────────────────────────────────────
+    // Also referenced in actions.ts as "virtual_history" — both names are the same
+    // Firestore collection; this rule covers it.
+
+    match /virtual_portfolio_history/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Virtual Trades ───────────────────────────────────────────────────────────
+
+    match /virtual_trades/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Virtual Decisions ────────────────────────────────────────────────────────
+
+    match /virtual_decisions/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Intel Reports (intel_reports) ────────────────────────────────────────────
+
+    match /intel_reports/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Ticker Intel ─────────────────────────────────────────────────────────────
+    // Documents keyed as "{userId}_{TICKER}" — we can't use isOwnerById directly,
+    // so we rely on the userId field stored in each document.
+
+    match /ticker_intel/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Market Stats ─────────────────────────────────────────────────────────────
+    // Documents keyed by userId (one document per user).
+
+    match /market_stats/{userId} {
+      allow read, write: if isOwnerById(userId);
+    }
+
+    // ─── Portfolios ───────────────────────────────────────────────────────────────
+
+    match /portfolios/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Portfolio History ────────────────────────────────────────────────────────
+
+    match /portfolio_history/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Cash Balances ────────────────────────────────────────────────────────────
+
+    match /cash_balances/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Cash History ─────────────────────────────────────────────────────────────
+
+    match /cash_history/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Realized PnL ─────────────────────────────────────────────────────────────
+
+    match /realized_pnl/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Portfolio Buys ───────────────────────────────────────────────────────────
+
+    match /portfolio_buys/{docId} {
+      allow read: if existingOwnerByField();
+      allow create: if isOwnerByField();
+      allow update, delete: if existingOwnerByField();
+    }
+
+    // ─── Server-only collections ──────────────────────────────────────────────────
+    // These are accessed exclusively via the Firebase Admin SDK from Next.js
+    // server actions (which bypass Security Rules). We explicitly DENY all
+    // client access here as a defence-in-depth measure.
+
+    match /agent_configs/{userId} {
+      allow read, write: if isOwnerById(userId);
+    }
+
+    match /proxy_cache/{docId} {
+      allow read, write: if false;
+    }
+
+    match /followed_advice/{docId} {
+      allow read, write: if false;
+    }
+
+    // ─── Deny everything else ─────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

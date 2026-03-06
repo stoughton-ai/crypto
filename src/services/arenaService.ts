@@ -16,16 +16,24 @@ import {
     type TradeReflection, type WeeklyReview, type StrategyChange,
     ARENA_START_DATE, ARENA_DURATION_DAYS, ARENA_WEEK_LENGTH,
     POOL_COUNT, POOL_BUDGET, TOTAL_BUDGET, TOKENS_PER_POOL,
+    type AssetClass, getArenaCollections,
 } from '@/lib/constants';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CONSTANTS
-// ═══════════════════════════════════════════════════════════════════════════
 
-const ARENA_COLLECTION = 'arena_config';
-const ARENA_TRADES_COLLECTION = 'arena_trades';
-const ARENA_REFLECTIONS_COLLECTION = 'arena_reflections';
-const ARENA_SNAPSHOTS_COLLECTION = 'arena_snapshots';
+// Collection names are now dynamic per asset class.
+// Use col(assetClass).config / .trades etc. rather than these hardcoded strings.
+// These legacy constants are kept ONLY for backward-compat references inside this file.
+const _CRYPTO_COLS = getArenaCollections('CRYPTO');
+const ARENA_COLLECTION = _CRYPTO_COLS.config;
+const ARENA_TRADES_COLLECTION = _CRYPTO_COLS.trades;
+const ARENA_REFLECTIONS_COLLECTION = _CRYPTO_COLS.reflections;
+const ARENA_SNAPSHOTS_COLLECTION = _CRYPTO_COLS.snapshots;
+
+// Shorthand for getting namespaced collections from an assetClass argument
+function col(assetClass: AssetClass = 'CRYPTO') {
+    return getArenaCollections(assetClass);
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -56,24 +64,65 @@ function isArenaActive(): boolean {
     return day >= 1 && day <= ARENA_DURATION_DAYS;
 }
 
-function isWeeklyReviewDue(pool: ArenaPool): boolean {
+/**
+ * Dynamic strategy review gate.
+ * AI agents can review and change their own strategies based on multiple triggers:
+ *   1. Weekly boundary (as before)
+ *   2. 5+ trades since last review (active trading warrants re-evaluation)
+ *   3. P&L dropped 3%+ since last review (performance deterioration)
+ *   4. Minimum 6 hours since last review (prevent over-reviewing)
+ */
+export function isDynamicReviewDue(pool: ArenaPool): boolean {
     const currentWeek = getCurrentWeek();
-    if (currentWeek <= 1) return false;
-    // Review is due if we haven't reviewed for this week boundary
-    const lastReviewWeek = pool.weeklyReviews.length > 0
-        ? Math.max(...pool.weeklyReviews.map(r => r.week))
-        : 0;
-    return currentWeek > lastReviewWeek && currentWeek > 1;
+    const lastReview = pool.weeklyReviews.length > 0
+        ? pool.weeklyReviews[pool.weeklyReviews.length - 1]
+        : null;
+
+    // Don't review in the first 3 hours (let the pool establish positions)
+    if (getDayNumber() <= 1 && !lastReview) {
+        const arenaStart = new Date(ARENA_START_DATE).getTime();
+        const hoursSinceStart = (Date.now() - arenaStart) / (1000 * 60 * 60);
+        if (hoursSinceStart < 3) return false;
+    }
+
+    // Minimum cooldown: 6 hours between reviews
+    if (lastReview) {
+        const hoursSinceLastReview = (Date.now() - new Date(lastReview.timestamp).getTime()) / (1000 * 60 * 60);
+        if (hoursSinceLastReview < 6) return false;
+    }
+
+    // Trigger 1: Weekly boundary (existing behavior)
+    if (currentWeek > 1) {
+        const lastReviewWeek = lastReview?.week || 0;
+        if (currentWeek > lastReviewWeek) return true;
+    }
+
+    // Trigger 2: Enough trades since last review to warrant re-evaluation
+    const tradesSinceLastReview = lastReview
+        ? pool.performance.totalTrades - (lastReview.trades || 0)
+        : pool.performance.totalTrades;
+    if (tradesSinceLastReview >= 5) return true;
+
+    // Trigger 3: P&L deterioration — pool is down 3%+ since last review
+    if (lastReview) {
+        const pnlDelta = pool.performance.totalPnlPct - lastReview.pnlPct;
+        if (pnlDelta <= -3) return true;
+    }
+
+    // Trigger 4: First review — run after first day if no review yet
+    if (!lastReview && pool.performance.totalTrades >= 2) return true;
+
+    return false;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CRUD OPERATIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Get the arena config for a user. */
-export async function getArenaConfig(userId: string): Promise<ArenaConfig | null> {
+/** Get the arena config for a user. assetClass defaults to 'CRYPTO' for backward compat. */
+export async function getArenaConfig(userId: string, assetClass: AssetClass = 'CRYPTO'): Promise<ArenaConfig | null> {
     if (!adminDb) return null;
-    const doc = await adminDb.collection(ARENA_COLLECTION).doc(userId).get();
+    const doc = await adminDb.collection(col(assetClass).config).doc(userId).get();
     return doc.exists ? doc.data() as ArenaConfig : null;
 }
 
@@ -85,14 +134,20 @@ export async function initializeArena(
         pool2: { name: string; emoji: string; tokens: [string, string]; strategy: PoolStrategy; reasoning: string };
         pool3: { name: string; emoji: string; tokens: [string, string]; strategy: PoolStrategy; reasoning: string };
         pool4: { name: string; emoji: string; tokens: [string, string]; strategy: PoolStrategy; reasoning: string };
-    }
+    },
+    assetClass: AssetClass = 'CRYPTO',
 ): Promise<{ success: boolean; message: string }> {
     if (!adminDb) return { success: false, message: 'Admin SDK not initialized' };
 
     // Check if arena already exists
-    const existing = await getArenaConfig(userId);
+    const existing = await getArenaConfig(userId, assetClass);
     if (existing?.initialized) {
-        return { success: false, message: 'Arena already initialized. Cannot re-initialize during a competition.' };
+        const isSandbox = assetClass !== 'CRYPTO';
+        if (!isSandbox) {
+            return { success: false, message: 'Arena already initialized. Cannot re-initialize during a competition.' };
+        }
+        // Sandbox arenas can be reset — reset handled by resetSandboxArena()
+        return { success: false, message: 'Sandbox arena already initialized. Use resetSandboxArena() to reset.' };
     }
 
     // Verify all tokens are unique
@@ -108,11 +163,14 @@ export async function initializeArena(
     }
 
     const now = new Date().toISOString();
-    const endDate = new Date(new Date(ARENA_START_DATE).getTime() + ARENA_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const isSandbox = assetClass !== 'CRYPTO';
+    // Sandbox: open-ended (no 28-day timer). Competition: standard 28 days.
+    const startDate = isSandbox ? now : ARENA_START_DATE;
+    const endDate = new Date(new Date(startDate).getTime() + ARENA_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
     function createPool(poolId: PoolId, config: typeof poolConfigs.pool1): ArenaPool {
         const emptyPerformance: PoolPerformance = {
-            startDate: ARENA_START_DATE,
+            startDate,
             totalPnl: 0,
             totalPnlPct: 0,
             winCount: 0,
@@ -141,11 +199,11 @@ export async function initializeArena(
         };
     }
 
-    const arena: ArenaConfig = {
+    const arena: ArenaConfig & { sandboxMode?: boolean; assetClass?: AssetClass; competitionMode?: boolean } = {
         userId,
-        startDate: ARENA_START_DATE,
+        startDate,
         endDate,
-        currentWeek: getCurrentWeek(),
+        currentWeek: isSandbox ? 1 : getCurrentWeek(),
         pools: [
             createPool('POOL_1', poolConfigs.pool1),
             createPool('POOL_2', poolConfigs.pool2),
@@ -155,28 +213,28 @@ export async function initializeArena(
         tokensLocked: true,
         totalBudget: TOTAL_BUDGET,
         initialized: true,
+        sandboxMode: isSandbox,
+        assetClass,
+        competitionMode: !isSandbox,
     };
 
-    await adminDb.collection(ARENA_COLLECTION).doc(userId).set(arena);
+    await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
 
-    console.log(`[Arena] ✅ Initialized 4 pools for user ${userId.substring(0, 8)}`);
-    console.log(`[Arena] Pool 1: ${poolConfigs.pool1.emoji} ${poolConfigs.pool1.name} [${poolConfigs.pool1.tokens.join(', ')}]`);
-    console.log(`[Arena] Pool 2: ${poolConfigs.pool2.emoji} ${poolConfigs.pool2.name} [${poolConfigs.pool2.tokens.join(', ')}]`);
-    console.log(`[Arena] Pool 3: ${poolConfigs.pool3.emoji} ${poolConfigs.pool3.name} [${poolConfigs.pool3.tokens.join(', ')}]`);
-    console.log(`[Arena] Pool 4: ${poolConfigs.pool4.emoji} ${poolConfigs.pool4.name} [${poolConfigs.pool4.tokens.join(', ')}]`);
+    console.log(`[Arena:${assetClass}] ✅ Initialized 4 pools for user ${userId.substring(0, 8)} [${isSandbox ? 'SANDBOX' : 'COMPETITION'}]`);
 
-    return { success: true, message: `Arena initialized with $${TOTAL_BUDGET} across ${POOL_COUNT} pools.` };
+    return { success: true, message: `${assetClass} arena initialized with £/$${TOTAL_BUDGET} across ${POOL_COUNT} pools. Mode: ${isSandbox ? 'SANDBOX' : 'COMPETITION'}.` };
 }
 
+
 /** Get all trades for a specific pool or all pools. */
-export async function getArenaTrades(userId: string, poolId?: PoolId): Promise<ArenaTradeRecord[]> {
+export async function getArenaTrades(userId: string, poolId?: PoolId, assetClass: AssetClass = 'CRYPTO'): Promise<ArenaTradeRecord[]> {
     if (!adminDb) return [];
-    let q = adminDb.collection(ARENA_TRADES_COLLECTION)
+    let q = adminDb.collection(col(assetClass).trades)
         .where('userId', '==', userId)
         .limit(200);
 
     if (poolId) {
-        q = adminDb.collection(ARENA_TRADES_COLLECTION)
+        q = adminDb.collection(col(assetClass).trades)
             .where('userId', '==', userId)
             .where('poolId', '==', poolId)
             .limit(100);
@@ -187,24 +245,27 @@ export async function getArenaTrades(userId: string, poolId?: PoolId): Promise<A
     return trades.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
+
 /** Record a trade in the arena. */
-export async function recordArenaTrade(trade: Omit<ArenaTradeRecord, 'id'>): Promise<string> {
+export async function recordArenaTrade(trade: Omit<ArenaTradeRecord, 'id'>, assetClass: AssetClass = 'CRYPTO'): Promise<string> {
     if (!adminDb) throw new Error('Admin SDK not initialized');
-    const ref = await adminDb.collection(ARENA_TRADES_COLLECTION).add({
+    const ref = await adminDb.collection(col(assetClass).trades).add({
         ...trade,
         createdAt: new Date().toISOString(),
     });
     return ref.id;
 }
 
+
 /** Record a trade reflection. */
-export async function recordTradeReflection(reflection: TradeReflection): Promise<void> {
+export async function recordTradeReflection(reflection: TradeReflection, assetClass: AssetClass = 'CRYPTO'): Promise<void> {
     if (!adminDb) return;
-    await adminDb.collection(ARENA_REFLECTIONS_COLLECTION).add({
+    await adminDb.collection(col(assetClass).reflections).add({
         ...reflection,
         createdAt: new Date().toISOString(),
     });
 }
+
 
 /** Get trade reflections for learning context. */
 export async function getTradeReflections(
@@ -212,10 +273,11 @@ export async function getTradeReflections(
     poolId: PoolId,
     ticker?: string,
     limit: number = 20,
+    assetClass: AssetClass = 'CRYPTO',
 ): Promise<TradeReflection[]> {
     if (!adminDb) return [];
 
-    let q = adminDb.collection(ARENA_REFLECTIONS_COLLECTION)
+    let q = adminDb.collection(col(assetClass).reflections)
         .where('poolId', '==', poolId)
         .orderBy('createdAt', 'desc')
         .limit(limit);
@@ -228,6 +290,7 @@ export async function getTradeReflections(
     }
     return reflections;
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POOL VALUE & PERFORMANCE
@@ -264,10 +327,11 @@ export async function recordDailySnapshot(
     poolId: PoolId,
     value: number,
     pnlPct: number,
+    assetClass: AssetClass = 'CRYPTO',
 ): Promise<void> {
     if (!adminDb) return;
     const today = new Date().toISOString().split('T')[0];
-    const docRef = adminDb.collection(ARENA_SNAPSHOTS_COLLECTION)
+    const docRef = adminDb.collection(col(assetClass).snapshots)
         .doc(userId)
         .collection(poolId)
         .doc(today);
@@ -279,6 +343,7 @@ export async function recordDailySnapshot(
         recordedAt: new Date().toISOString(),
     }, { merge: true });
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TRADE EXECUTION
@@ -294,6 +359,7 @@ export async function executePoolBuy(
     reason: string,
     marketContext: ArenaTradeRecord['marketContext'],
     preTradeReflection: string,
+    assetClass: AssetClass = 'CRYPTO',
 ): Promise<{ success: boolean; trade?: ArenaTradeRecord; error?: string }> {
     if (!adminDb) return { success: false, error: 'Admin SDK not initialized' };
 
@@ -318,6 +384,7 @@ export async function executePoolBuy(
         amount: newAmount,
         averagePrice: newAvgPrice,
         peakPrice: Math.max(holding.peakPrice || 0, price),
+        peakPnlPct: 0,
         boughtAt: new Date().toISOString(),
     };
     pool.cashBalance -= total;
@@ -339,20 +406,21 @@ export async function executePoolBuy(
         preTradeReflection,
     };
 
-    const tradeId = await recordArenaTrade(trade);
+    const tradeId = await recordArenaTrade(trade, assetClass);
 
     // Save updated arena config
-    const arena = await getArenaConfig(userId);
+    const arena = await getArenaConfig(userId, assetClass);
     if (arena) {
         const poolIdx = arena.pools.findIndex(p => p.poolId === pool.poolId);
         if (poolIdx >= 0) {
             arena.pools[poolIdx] = pool;
-            await adminDb.collection(ARENA_COLLECTION).doc(userId).set(arena);
+            await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
         }
     }
 
     return { success: true, trade: { ...trade, id: tradeId } as ArenaTradeRecord };
 }
+
 
 /** Execute a sell trade within a pool. */
 export async function executePoolSell(
@@ -364,6 +432,7 @@ export async function executePoolSell(
     reason: string,
     marketContext: ArenaTradeRecord['marketContext'],
     preTradeReflection: string,
+    assetClass: AssetClass = 'CRYPTO',
 ): Promise<{ success: boolean; trade?: ArenaTradeRecord; pnl?: number; pnlPct?: number; error?: string }> {
     if (!adminDb) return { success: false, error: 'Admin SDK not initialized' };
 
@@ -391,11 +460,16 @@ export async function executePoolSell(
         };
     }
 
+    // Record sell timestamp for anti-wash enforcement
+    if (!pool.lastSoldAt) pool.lastSoldAt = {};
+    pool.lastSoldAt[upperTicker] = new Date().toISOString();
+
     pool.cashBalance += total;
     pool.performance.totalTrades++;
 
-    // Track wins/losses
-    if (pnl >= 0) {
+    // Track wins/losses — require minimum profit to count as a "win"
+    const minWin = pool.strategy.minWinPct || 0.5; // Default 0.5% minimum profit
+    if (pnlPct >= minWin) {
         pool.performance.winCount++;
         if (!pool.performance.bestTrade || pnlPct > pool.performance.bestTrade.pnlPct) {
             pool.performance.bestTrade = { ticker: upperTicker, pnlPct };
@@ -425,7 +499,7 @@ export async function executePoolSell(
         preTradeReflection,
     };
 
-    const tradeId = await recordArenaTrade(trade);
+    const tradeId = await recordArenaTrade(trade, assetClass);
 
     // Record post-trade reflection for learning
     await recordTradeReflection({
@@ -450,20 +524,21 @@ export async function executePoolSell(
             assessedAt: new Date().toISOString(),
             lessonLearned: preTradeReflection,
         },
-    });
+    }, assetClass);
 
     // Save updated arena config
-    const arena = await getArenaConfig(userId);
+    const arena = await getArenaConfig(userId, assetClass);
     if (arena) {
         const poolIdx = arena.pools.findIndex(p => p.poolId === pool.poolId);
         if (poolIdx >= 0) {
             arena.pools[poolIdx] = pool;
-            await adminDb.collection(ARENA_COLLECTION).doc(userId).set(arena);
+            await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
         }
     }
 
     return { success: true, trade: { ...trade, id: tradeId } as ArenaTradeRecord, pnl, pnlPct };
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // WEEKLY REVIEW
@@ -475,10 +550,11 @@ export async function recordWeeklyReview(
     poolId: PoolId,
     review: WeeklyReview,
     newStrategy?: PoolStrategy,
+    assetClass: AssetClass = 'CRYPTO',
 ): Promise<void> {
     if (!adminDb) return;
 
-    const arena = await getArenaConfig(userId);
+    const arena = await getArenaConfig(userId, assetClass);
     if (!arena) return;
 
     const poolIdx = arena.pools.findIndex(p => p.poolId === poolId);
@@ -503,17 +579,19 @@ export async function recordWeeklyReview(
     }
 
     arena.pools[poolIdx] = pool;
-    await adminDb.collection(ARENA_COLLECTION).doc(userId).set(arena);
+    await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
 }
+
 
 /** Pause a pool (e.g., after hitting stop-loss). */
 export async function pauseArenaPool(
     userId: string,
     poolId: PoolId,
     reason: string,
+    assetClass: AssetClass = 'CRYPTO',
 ): Promise<void> {
     if (!adminDb) return;
-    const arena = await getArenaConfig(userId);
+    const arena = await getArenaConfig(userId, assetClass);
     if (!arena) return;
 
     const poolIdx = arena.pools.findIndex(p => p.poolId === poolId);
@@ -521,16 +599,17 @@ export async function pauseArenaPool(
 
     arena.pools[poolIdx].status = 'PAUSED';
     arena.pools[poolIdx].pauseReason = reason;
-    await adminDb.collection(ARENA_COLLECTION).doc(userId).set(arena);
+    await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
 }
 
 /** Resume a paused pool. */
 export async function resumeArenaPool(
     userId: string,
     poolId: PoolId,
+    assetClass: AssetClass = 'CRYPTO',
 ): Promise<void> {
     if (!adminDb) return;
-    const arena = await getArenaConfig(userId);
+    const arena = await getArenaConfig(userId, assetClass);
     if (!arena) return;
 
     const poolIdx = arena.pools.findIndex(p => p.poolId === poolId);
@@ -538,7 +617,85 @@ export async function resumeArenaPool(
 
     arena.pools[poolIdx].status = 'ACTIVE';
     arena.pools[poolIdx].pauseReason = undefined;
-    await adminDb.collection(ARENA_COLLECTION).doc(userId).set(arena);
+    await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SANDBOX MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Reset a sandbox arena: delete all collections for that assetClass and wipe the config.
+ * NEVER touches CRYPTO collections. Sandbox-only operation.
+ */
+export async function resetSandboxArena(userId: string, assetClass: AssetClass): Promise<{ success: boolean; message: string }> {
+    if (!adminDb) return { success: false, message: 'Admin SDK not initialized' };
+    if (assetClass === 'CRYPTO') return { success: false, message: 'Cannot reset the live CRYPTO arena. This is a sandbox-only operation.' };
+
+    const collections = col(assetClass);
+
+    // Delete arena config
+    await adminDb.collection(collections.config).doc(userId).delete().catch(() => { });
+
+    // Delete all trades
+    const tradesSnap = await adminDb.collection(collections.trades).where('userId', '==', userId).limit(500).get();
+    const batch = adminDb.batch();
+    tradesSnap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+
+    // Delete reflections
+    const refSnap = await adminDb.collection(collections.reflections).where('poolId', '!=', '').limit(500).get();
+    const batch2 = adminDb.batch();
+    refSnap.docs.forEach(d => batch2.delete(d.ref));
+    await batch2.commit();
+
+    console.log(`[Arena:${assetClass}] 🔄 Sandbox reset complete for user ${userId.substring(0, 8)}`);
+    return { success: true, message: `${assetClass} sandbox arena reset. Ready to re-initialize.` };
+}
+
+/**
+ * Activate competition mode for a sandbox arena.
+ * One-way gate: sets competitionMode=true, locks the start date, resets cash balances.
+ * Cannot be undone.
+ */
+export async function activateCompetitionMode(userId: string, assetClass: AssetClass): Promise<{ success: boolean; message: string }> {
+    if (!adminDb) return { success: false, message: 'Admin SDK not initialized' };
+    if (assetClass === 'CRYPTO') return { success: false, message: 'CRYPTO arena is already in competition mode.' };
+
+    const arena = await getArenaConfig(userId, assetClass) as any;
+    if (!arena?.initialized) return { success: false, message: `${assetClass} arena not initialized yet.` };
+    if (arena.competitionMode) return { success: false, message: `${assetClass} arena is already in competition mode.` };
+
+    const now = new Date().toISOString();
+    const endDate = new Date(Date.now() + ARENA_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+    // Reset pools to fresh cash, keep selected tokens
+    arena.pools = arena.pools.map((p: any) => ({
+        ...p,
+        cashBalance: POOL_BUDGET,
+        holdings: {},
+        performance: {
+            startDate: now,
+            totalPnl: 0, totalPnlPct: 0,
+            winCount: 0, lossCount: 0, totalTrades: 0,
+            bestTrade: null, worstTrade: null, dailySnapshots: [],
+        },
+        weeklyReviews: [],
+        strategyHistory: [],
+        lastSoldAt: {},
+        scoreHistory: {},
+    }));
+
+    arena.startDate = now;
+    arena.endDate = endDate;
+    arena.sandboxMode = false;
+    arena.competitionMode = true;
+    arena.currentWeek = 1;
+
+    await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
+    console.log(`[Arena:${assetClass}] 🏆 Competition mode ACTIVATED for user ${userId.substring(0, 8)}`);
+    return { success: true, message: `${assetClass} arena is now in 28-day competition mode. Start date: ${now}.` };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -549,6 +706,5 @@ export {
     getCurrentWeek,
     getDayNumber,
     isArenaActive,
-    isWeeklyReviewDue,
     safeNum,
 };

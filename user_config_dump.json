@@ -1,0 +1,2377 @@
+{
+  "userId": "SF87h3pQoxfkkFfD7zCSOXgtz5h1",
+  "volatilityTriggerEnabled": true,
+  "rebalanceEnabled": true,
+  "retentionLimit": 1000,
+  "legacyPnlOffset": -366.08,
+  "sandboxCycle": 2,
+  "trafficCycle": 0.166,
+  "aiCycle": 3,
+  "revolutApiKey": "d2x4SSxYFV6GARaNdoLpTkvcJ74gD9Asj6qXIodR9RUQSMQRn0VKdPIJtfZTvPKh",
+  "revolutPrivateKey": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDGRuPNQEXrh3WCWcYMk+5/mAoqV5A9LnZlu4k8/ytFT\n-----END PRIVATE KEY-----",
+  "revolutIsSandbox": false,
+  "watchdogNotificationsEnabled": false,
+  "lastMarketSnapshot": {
+    "AAVE": {
+      "price": 126.33,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "PAXG": {
+      "price": 4999.46,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "WLFI": {
+      "price": 0.1279,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "BCH": {
+      "price": 555,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "DOGE": {
+      "price": 0.10043,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "LINK": {
+      "price": 8.74,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "ETH": {
+      "price": 1977.95,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "LEO": {
+      "price": 8.49,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "TRX": {
+      "price": 0.27983,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "ZEC": {
+      "price": 281.42,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "AVAX": {
+      "price": 9,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "XRP": {
+      "price": 1.46,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "BTC": {
+      "price": 67157,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "XAUT": {
+      "price": 4972.9,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "POL": {
+      "price": 0.108625,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    },
+    "DOT": {
+      "price": 1.34,
+      "timestamp": "2026-02-18T15:02:52.810Z"
+    }
+  },
+  "analysisCycle": 0.5,
+  "riskProfile": "RISK",
+  "scalingScoreThreshold": 70,
+  "minCashReservePct": 0,
+  "strategicLimitsOrder": [
+    "maxAllocationPerAsset",
+    "buyScoreThreshold",
+    "scalingScoreThreshold",
+    "positionStopLoss",
+    "aiScoreExitThreshold",
+    "minMarketCap",
+    "minCashReservePct",
+    "portfolioStopLoss"
+  ],
+  "positionStopLoss": -25,
+  "minOrderAmount": 50,
+  "aiScoreExitThreshold": 45,
+  "buyScoreThreshold": 50,
+  "portfolioStopLoss": 30,
+  "minMarketCap": 25,
+  "stopLossPeakValue": null,
+  "stopLossTriggered": false,
+  "stopLossCurrentValue": null,
+  "automationEnabled": true,
+  "stopLossTriggeredAt": null,
+  "stopLossDrawdownPct": null,
+  "watchdogEnabled": false,
+  "stopLossResumedAt": "2026-02-21T13:02:27.167Z",
+  "maxAllocationPerAsset": 275,
+  "reflectionHistory": [
+    {
+      "synopsis": "Neural Synopsis:\nMy portfolio underperformed the global market by 2.42% over the last 24 hours due to missed opportunities in YGG, INJ, and SNX. I will recalibrate my conviction model to emphasize volume and momentum indicators more aggressively, especially when coupled with strong RSI divergence, to identify and capitalize on similar potential breakouts. Specifically, assets like YGG with low previous conviction but substantial price increase should be given higher weights.\n",
+      "gainers": [
+        {
+          "ticker": "YGG",
+          "change24h": 22.785,
+          "score": "No Data"
+        },
+        {
+          "ticker": "INJ",
+          "change24h": 11.444,
+          "score": 77
+        },
+        {
+          "ticker": "SNX",
+          "change24h": 10.541,
+          "score": 57
+        }
+      ],
+      "portfolioChange": -1.1805639273022885,
+      "marketChange": 1.24,
+      "generatedAt": "2026-02-21T17:43:51.640Z"
+    }
+  ],
+  "dailyReflection": {
+    "synopsis": "Neural Synopsis:\nMy portfolio underperformed the global market by 2.42% over the last 24 hours due to missed opportunities in YGG, INJ, and SNX. I will recalibrate my conviction model to emphasize volume and momentum indicators more aggressively, especially when coupled with strong RSI divergence, to identify and capitalize on similar potential breakouts. Specifically, assets like YGG with low previous conviction but substantial price increase should be given higher weights.\n",
+    "gainers": [
+      {
+        "ticker": "YGG",
+        "change24h": 22.785,
+        "score": "No Data"
+      },
+      {
+        "ticker": "INJ",
+        "change24h": 11.444,
+        "score": 77
+      },
+      {
+        "ticker": "SNX",
+        "change24h": 10.541,
+        "score": 57
+      }
+    ],
+    "portfolioChange": -1.1805639273022885,
+    "marketChange": 1.24,
+    "generatedAt": "2026-02-21T17:43:51.640Z"
+  },
+  "selfCorrectionPrompt": "Neural Patch: I will increase conviction scores for assets exhibiting high volume and positive momentum, particularly when supported by RSI divergence, even if initial conviction was low.\n",
+  "tradingSectionsOrder": [
+    "automation",
+    "risk",
+    "limits"
+  ],
+  "lastRebalance": {
+    "brainWaterfall": "2026-02-21T19:43:46.017Z"
+  },
+  "trafficLightTokens": [
+    "AAVE"
+  ],
+  "excludedTokens": [
+    "USD1",
+    "PYUSD",
+    "WLFI",
+    "PAXG",
+    "LEO",
+    "USDS",
+    "USDE",
+    "FIGR_HELOC",
+    "NEAR",
+    "CC",
+    "XMR",
+    "PIPPIN",
+    "NIGHT",
+    "USDT",
+    "KCS",
+    "OKB",
+    "KITE",
+    "ASTER",
+    "ZEC",
+    "BGB",
+    "TAO",
+    "HASH",
+    "NEXO",
+    "XAUT",
+    "KAS",
+    "HNT",
+    "HYPE",
+    "TIBBIR",
+    "9BIT",
+    "ONDO"
+  ],
+  "realTradingEnabled": false,
+  "lastCheck": {
+    "MATIC": "2026-02-20T21:23:55.758Z",
+    "XDC": "2026-02-21T21:40:49.830Z",
+    "ARB": "2026-02-21T21:22:54.103Z",
+    "XLM": "2026-02-21T18:31:55.234Z",
+    "TIA": "2026-02-21T19:59:21.206Z",
+    "INJ": "2026-02-21T19:58:40.705Z",
+    "SHIB": "2026-02-21T19:27:29.740Z",
+    "OP": "2026-02-20T21:23:55.758Z",
+    "GODS": "2026-02-20T21:23:55.758Z",
+    "XAN": "2026-02-17T21:44:20.615Z",
+    "DASH": "2026-02-20T21:31:48.156Z",
+    "WIF": "2026-02-21T13:05:47.636Z",
+    "ZAMA": "2026-02-18T10:10:11.211Z",
+    "HNT": "2026-02-21T08:57:48.320Z",
+    "RNDR": "2026-02-20T21:23:54.903Z",
+    "USD1": "2026-02-18T15:30:56.921Z",
+    "USDC": "2026-02-18T15:30:40.881Z",
+    "QUQ": "2026-02-18T10:10:51.885Z",
+    "ORCA": "2026-02-20T05:38:33.658Z",
+    "SPX": "2026-02-18T14:53:10.832Z",
+    "PYUSD": "2026-02-18T14:53:47.012Z",
+    "SKY": "2026-02-21T19:59:01.152Z",
+    "SUI": "2026-02-21T19:15:55.655Z",
+    "PEPE": "2026-02-20T21:23:55.758Z",
+    "SOL": "2026-02-21T20:22:39.434Z",
+    "FET": "2026-02-21T10:47:17.501Z",
+    "BNB": "2026-02-21T19:41:40.840Z",
+    "LTC": "2026-02-21T20:23:17.419Z",
+    "ADA": "2026-02-21T12:39:32.403Z",
+    "AAVE": "2026-02-21T22:04:50.741Z",
+    "PAXG": "2026-02-18T17:37:58.508Z",
+    "WLFI": "2026-02-18T17:37:49.252Z",
+    "BCH": "2026-02-21T20:59:46.858Z",
+    "DOGE": "2026-02-21T19:27:15.235Z",
+    "LINK": "2026-02-21T21:00:00.526Z",
+    "ETH": "2026-02-21T20:22:58.961Z",
+    "LEO": "2026-02-18T15:00:07.871Z",
+    "TRX": "2026-02-21T19:27:22.319Z",
+    "ZEC": "2026-02-20T10:33:16.285Z",
+    "AVAX": "2026-02-21T19:09:56.090Z",
+    "XRP": "2026-02-21T21:56:49.432Z",
+    "BTC": "2026-02-21T20:23:11.117Z",
+    "XAUT": "2026-02-20T19:21:46.844Z",
+    "POL": "2026-02-21T21:23:47.231Z",
+    "DOT": "2026-02-21T20:23:04.957Z",
+    "USDT": "2026-02-18T15:02:49.015Z",
+    "MOLT": "2026-02-18T19:01:02.111Z",
+    "HBAR": "2026-02-21T17:44:16.932Z",
+    "UNI": "2026-02-21T13:04:41.557Z",
+    "ATOM": "2026-02-21T08:31:12.092Z",
+    "NEAR": "2026-02-18T22:04:31.376Z",
+    "APT": "2026-02-21T21:02:46.736Z",
+    "FIL": "2026-02-21T21:00:08.285Z",
+    "FIGR_HELOC": "2026-02-18T22:04:31.376Z",
+    "WBT": "2026-02-18T20:46:38.678Z",
+    "USDS": "2026-02-18T20:46:45.143Z",
+    "USDE": "2026-02-18T20:47:09.786Z",
+    "CC": "2026-02-18T23:36:24.520Z",
+    "HYPE": "2026-02-21T10:47:11.007Z",
+    "XMR": "2026-02-18T23:50:08.369Z",
+    "RAIN": "2026-02-20T09:19:12.851Z",
+    "PUMP": "2026-02-21T00:41:35.995Z",
+    "ALGO": "2026-02-21T13:15:29.981Z",
+    "VET": "2026-02-21T17:44:48.743Z",
+    "MNT": "2026-02-20T19:16:50.308Z",
+    "BONK": "2026-02-21T18:53:56.091Z",
+    "FLOKI": "2026-02-18T22:32:22.338Z",
+    "JUP": "2026-02-21T19:26:39.114Z",
+    "TAO": "2026-02-20T16:32:17.258Z",
+    "WLD": "2026-02-21T18:33:17.263Z",
+    "NEXO": "2026-02-20T19:16:49.186Z",
+    "ENA": "2026-02-21T19:26:55.093Z",
+    "ONDO": "2026-02-21T19:59:14.846Z",
+    "FLR": "2026-02-21T13:08:16.464Z",
+    "M": "2026-02-20T16:29:11.588Z",
+    "OKB": "2026-02-20T01:20:07.731Z",
+    "ETC": "2026-02-21T21:00:14.567Z",
+    "ICP": "2026-02-21T21:23:54.106Z",
+    "PIPPIN": "2026-02-19T11:09:36.426Z",
+    "HASH": "2026-02-20T18:47:46.489Z",
+    "MORPHO": "2026-02-21T20:59:54.252Z",
+    "STABLE": "2026-02-20T21:25:32.183Z",
+    "KAS": "2026-02-20T19:21:46.844Z",
+    "TON": "2026-02-21T19:27:08.321Z",
+    "QNT": "2026-02-20T11:43:17.718Z",
+    "NIGHT": "2026-02-19T20:01:32.822Z",
+    "SEI": "2026-02-20T16:29:11.588Z",
+    "PI": "2026-02-20T19:13:47.625Z",
+    "TRUMP": "2026-02-21T19:27:02.032Z",
+    "ASTER": "2026-02-20T10:33:16.285Z",
+    "RENDER": "2026-02-21T18:14:10.888Z",
+    "KITE": "2026-02-20T10:33:16.285Z",
+    "BGB": "2026-02-20T11:43:17.718Z",
+    "USDY": "2026-02-20T14:22:52.818Z",
+    "GT": "2026-02-20T21:25:32.183Z",
+    "CRO": "2026-02-20T21:25:32.183Z",
+    "HTX": "2026-02-20T21:25:32.183Z",
+    "EUTBL": "2026-02-20T21:25:32.183Z",
+    "GHO": "2026-02-20T21:25:32.183Z",
+    "BDX": "2026-02-20T21:25:32.183Z",
+    "USD0": "2026-02-20T21:25:32.183Z",
+    "A7A5": "2026-02-20T21:25:32.183Z",
+    "RLUSD": "2026-02-20T21:25:32.183Z",
+    "USDAI": "2026-02-20T21:25:32.183Z",
+    "USDTB": "2026-02-20T21:25:32.183Z",
+    "BFUSD": "2026-02-20T21:25:32.183Z",
+    "USDD": "2026-02-20T21:25:32.183Z",
+    "JTRSY": "2026-02-20T21:25:32.183Z",
+    "USDF": "2026-02-20T21:25:32.183Z",
+    "USDG": "2026-02-20T21:25:32.183Z",
+    "USTB": "2026-02-20T21:25:32.183Z",
+    "OUSG": "2026-02-20T21:25:32.183Z",
+    "JAAA": "2026-02-20T21:25:32.183Z",
+    "DAI": "2026-02-20T21:25:59.020Z",
+    "STX": "2026-02-20T21:25:59.020Z",
+    "AGIX": "2026-02-20T21:31:48.839Z",
+    "MINA": "2026-02-20T21:31:48.839Z",
+    "IMX": "2026-02-21T15:58:54.208Z",
+    "ROSE": "2026-02-20T21:31:48.839Z",
+    "PYTH": "2026-02-20T21:31:48.839Z",
+    "RON": "2026-02-20T21:31:48.839Z",
+    "SNX": "2026-02-21T11:55:12.261Z",
+    "STRK": "2026-02-20T21:31:48.839Z",
+    "ZRO": "2026-02-21T19:59:08.575Z",
+    "W": "2026-02-20T21:31:48.839Z",
+    "BLZ": "2026-02-20T21:31:48.839Z",
+    "ONT": "2026-02-20T21:39:19.226Z",
+    "IOTX": "2026-02-20T21:39:19.226Z",
+    "ANKR": "2026-02-20T21:39:19.226Z",
+    "MASK": "2026-02-20T21:39:19.226Z",
+    "LRC": "2026-02-20T21:39:19.226Z",
+    "ENS": "2026-02-21T12:10:26.747Z",
+    "YGG": "2026-02-20T21:40:21.025Z",
+    "RAY": "2026-02-20T21:31:48.839Z",
+    "ARKM": "2026-02-20T21:31:48.839Z",
+    "AERO": "2026-02-21T12:10:42.479Z",
+    "JTO": "2026-02-21T11:04:48.272Z",
+    "ZIL": "2026-02-20T21:31:48.839Z",
+    "ID": "2026-02-20T21:31:48.839Z",
+    "UMA": "2026-02-20T21:31:48.839Z",
+    "GMT": "2026-02-20T21:31:48.839Z",
+    "CRV": "2026-02-20T21:40:21.025Z",
+    "GAL": "2026-02-20T21:40:21.025Z",
+    "VVV": "2026-02-21T12:10:34.514Z",
+    "MYX": "2026-02-21T09:22:13.202Z",
+    "RAVE": "2026-02-20T22:27:05.377Z",
+    "9BIT": "2026-02-21T16:48:00.977Z",
+    "SENT": "2026-02-20T22:17:05.873Z",
+    "TIBBIR": "2026-02-21T16:47:53.632Z",
+    "AWE": "2026-02-20T21:48:36.568Z",
+    "QRL": "2026-02-21T16:48:07.736Z",
+    "SKR": "2026-02-21T06:21:59.797Z",
+    "2Z": "2026-02-21T08:57:35.154Z",
+    "0G": "2026-02-20T22:17:05.873Z",
+    "DCR": "2026-02-20T22:17:05.873Z",
+    "CHZ": "2026-02-21T10:40:24.251Z",
+    "COW": "2026-02-21T19:58:47.384Z",
+    "AXS": "2026-02-21T11:30:45.679Z",
+    "GRT": "2026-02-21T18:59:56.463Z",
+    "JASMY": "2026-02-21T13:05:10.597Z",
+    "BERA": "2026-02-21T04:02:23.911Z",
+    "PENGU": "2026-02-21T08:08:03.014Z",
+    "GALA": "2026-02-21T21:02:52.972Z",
+    "DEXE": "2026-02-21T16:48:14.200Z",
+    "THETA": "2026-02-21T16:48:21.572Z"
+  },
+  "lastSnapshotTime": "2026-02-21T22:11:40.218Z",
+  "sandboxTokens": [
+    "GRT",
+    "AVAX"
+  ],
+  "standardTokens": [
+    "ARB",
+    "XDC",
+    "ICP"
+  ],
+  "lastTrade": {
+    "LEO": "2026-02-17T13:53:19.408Z",
+    "RNDR": "2026-02-17T13:53:19.473Z",
+    "XAN": "2026-02-17T14:46:51.118Z",
+    "GODS": "2026-02-17T14:46:51.644Z",
+    "USDC": "2026-02-18T23:21:58.162Z",
+    "SPX": "2026-02-18T23:45:46.665Z",
+    "ORCA": "2026-02-19T11:18:06.036Z",
+    "USDT": "2026-02-19T20:49:25.092Z",
+    "XLM": "2026-02-20T12:30:26.176Z",
+    "AAVE": "2026-02-20T13:55:14.951Z",
+    "DOGE": "2026-02-20T14:18:16.738Z",
+    "VET": "2026-02-20T16:53:10.991Z",
+    "JUP": "2026-02-20T18:05:41.700Z",
+    "ALGO": "2026-02-20T19:16:46.270Z",
+    "ADA": "2026-02-20T19:16:45.962Z",
+    "BONK": "2026-02-20T20:07:24.199Z",
+    "TRX": "2026-02-20T20:30:21.642Z",
+    "LTC": "2026-02-20T22:46:52.959Z",
+    "TRUMP": "2026-02-21T04:31:52.185Z",
+    "HBAR": "2026-02-21T05:03:56.258Z",
+    "AVAX": "2026-02-21T07:39:55.868Z",
+    "HNT": "2026-02-21T10:21:04.119Z",
+    "2Z": "2026-02-21T10:58:02.860Z",
+    "ONDO": "2026-02-21T12:21:22.570Z",
+    "UNI": "2026-02-21T13:06:12.747Z",
+    "JASMY": "2026-02-21T13:06:11.544Z",
+    "APT": "2026-02-21T20:55:29.656Z",
+    "MORPHO": "2026-02-21T20:57:16.624Z",
+    "INJ": "2026-02-21T20:57:18.628Z",
+    "ZRO": "2026-02-21T20:57:17.695Z",
+    "ETH": "2026-02-21T20:57:18.324Z",
+    "LINK": "2026-02-21T20:57:14.695Z",
+    "COW": "2026-02-21T20:57:18.013Z",
+    "GALA": "2026-02-21T21:00:21.141Z",
+    "SKY": "2026-02-21T21:05:45.591Z",
+    "BCH": "2026-02-21T21:05:44.757Z",
+    "SOL": "2026-02-21T21:06:44.518Z",
+    "ETC": "2026-02-21T21:15:44.565Z",
+    "BNB": "2026-02-21T21:30:24.462Z",
+    "POL": "2026-02-21T21:40:52.579Z",
+    "FIL": "2026-02-21T21:44:45.633Z",
+    "BTC": "2026-02-21T22:13:45.673Z",
+    "SUI": "2026-02-21T22:13:45.674Z",
+    "XRP": "2026-02-21T22:13:45.675Z",
+    "DOT": "2026-02-21T22:13:45.670Z"
+  },
+  "aiWatchlist": [
+    "MORPHO",
+    "ETH",
+    "ZRO",
+    "SOL",
+    "ETC",
+    "FIL",
+    "BTC",
+    "DOT"
+  ],
+  "brainState": {
+    "lastActive": "2026-02-21T22:14:48.625Z",
+    "currentAction": "Idle. Monitoring Volatility...",
+    "cycleComplete": true
+  },
+  "cycle_logs": [
+    {
+      "timestamp": "2026-02-21T22:14:48.719Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "LTC",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SKY",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 66,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.59, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:14:48.719Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.5907269759856,
+        "newTotalValue": 578.4989668188481
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:12:49.204Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:12:49.204Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 579.704380384368
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:11:49.991Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:11:49.991Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 579.526810003408
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:10:49.577Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:10:49.577Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 579.7669103019102
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:09:49.028Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:09:49.028Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 580.4455046722204
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:08:50.487Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:08:50.487Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 580.1920593406945
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:07:49.853Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:07:49.853Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 580.5366446762399
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:06:50.497Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:06:50.497Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 580.5278585407095
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:05:48.400Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:05:48.400Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 580.6917501430771
+      }
+    },
+    {
+      "timestamp": "2026-02-21T22:04:59.565Z",
+      "vibe": {
+        "multiplier": 2,
+        "globalChange": "0.0",
+        "fng": 8,
+        "label": "🌀 CAUTIOUS"
+      },
+      "execution": {
+        "trades": [],
+        "decisions": [
+          {
+            "action": "SKIP",
+            "ticker": "AAVE",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 76,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "FIL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "POL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XDC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 58,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ARB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 77,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "AVAX",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 64,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BCH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BTC",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "COW",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "DOT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ETH",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "GRT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ICP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 65,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "INJ",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SOL",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 75,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "SUI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 68,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "TIA",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 67,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "UNI",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "XRP",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 79,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "ZRO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "APT",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 72,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "BNB",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "JASMY",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 78,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          },
+          {
+            "action": "SKIP",
+            "ticker": "MORPHO",
+            "reason": "Insufficient liquidity. Cash: $38.88, Req Reserve: $0.00",
+            "score": 74,
+            "createdAt": "2026-02-21T22:04:59.565Z"
+          }
+        ],
+        "initialBalance": 600,
+        "newCashBalance": 38.87638361094011,
+        "newTotalValue": 580.676305619049
+      }
+    }
+  ]
+}

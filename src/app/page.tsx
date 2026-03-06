@@ -3,12 +3,15 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import ArenaDashboard from "@/components/ArenaDashboard";
+import MissionSelector from "@/components/MissionSelector";
 import { motion } from "framer-motion";
 import { Loader2, Zap, LogOut, Shield } from "lucide-react";
+import { getAllArenaStatuses } from "@/app/actions";
 
 export default function Home() {
   const { user, loading: authLoading, signInWithGoogle, logout } = useAuth();
   const [isMobile, setIsMobile] = useState(false);
+  const [missionCards, setMissionCards] = useState<any[]>([]);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
@@ -16,6 +19,15 @@ export default function Home() {
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const load = () => getAllArenaStatuses(user.uid).then(setMissionCards).catch(() => { });
+    load();
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, [user]);
+
 
   if (authLoading) {
     return (
@@ -69,11 +81,11 @@ export default function Home() {
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8 relative z-10 animate-fade-in">
-      {/* Top Navigation */}
+      {/* Top Navigation — restored */}
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="flex justify-between items-center mb-10"
+        className="flex justify-between items-center mb-8"
       >
         <div className="flex items-center gap-3 font-outfit text-xl font-bold tracking-tight text-white">
           <span className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.4)]">
@@ -98,9 +110,13 @@ export default function Home() {
         </div>
       </motion.div>
 
-      {/* Main Arena Content */}
-      <ArenaDashboard userId={user.uid} />
+      {/* Arena Mission Selector */}
+      {missionCards.length > 0 && (
+        <MissionSelector cards={missionCards} />
+      )}
 
+      {/* Main Crypto Arena Dashboard */}
+      <ArenaDashboard />
     </main>
   );
 }

@@ -1,1 +1,24 @@
-{}
+{
+    "crons": [
+        {
+            "path": "/api/cron/arena",
+            "schedule": "*/3 * * * *"
+        },
+        {
+            "path": "/api/cron/eod",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/cron/arena-ftse",
+            "schedule": "0 * * * *"
+        },
+        {
+            "path": "/api/cron/arena-nyse",
+            "schedule": "0 * * * *"
+        },
+        {
+            "path": "/api/cron/arena-commodities",
+            "schedule": "0 * * * *"
+        }
+    ]
+}
