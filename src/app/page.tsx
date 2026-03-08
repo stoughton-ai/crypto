@@ -85,7 +85,7 @@ export default function Home() {
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="flex justify-between items-center mb-8"
+        className="flex justify-between items-center mb-8 flex-wrap gap-4"
       >
         <div className="flex items-center gap-3 font-outfit text-xl font-bold tracking-tight text-white">
           <span className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.4)]">

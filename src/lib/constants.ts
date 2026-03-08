@@ -244,6 +244,21 @@ export interface PoolStrategy {
     exitHysteresis?: number;            // Points below exitThreshold needed to actually sell (default 10)
     positionSizeMultiplier?: number;    // 0.5-1.0, base multiplier for position sizing (default 0.8)
     strategyPersonality?: 'PATIENT' | 'MODERATE' | 'AGGRESSIVE'; // Shapes the scoring prompt tone
+    stopLossReentryHours?: number;      // Shorter cooldown applied when last sell was a stop-loss (default 6h vs antiWashHours 24h)
+    reboundEntryPct?: number;           // % price must recover above exit price before Phase C re-entry fires (default 1.5)
+    reboundRsiMin?: number;             // RSI(14) must be above this floor for rebound re-entry (default 35 — filters still-falling assets)
+
+    // ─── GRADUATED POSITION MANAGEMENT (GPM) ───────────────────────────
+    // Instead of binary hold/stop-loss, GPM scales positions proportionally
+    // as AI conviction falls. Requires gpmConfirmationCycles consecutive
+    // evaluations below a zone boundary before any partial sell fires,
+    // preventing churn from single noisy LLM readings.
+    gpmEnabled?: boolean;             // Master on/off (default true)
+    gpmCautionZoneScore?: number;     // Score below which CAUTION fires — sell to cautionPositionPct (default 70)
+    gpmDefensiveZoneScore?: number;   // Score below which DEFENSIVE fires — sell to defensivePositionPct (default 55)
+    gpmCautionPositionPct?: number;   // Target holding % of maxAlloc in CAUTION zone (default 50)
+    gpmDefensivePositionPct?: number; // Target holding % of maxAlloc in DEFENSIVE zone (default 25)
+    gpmConfirmationCycles?: number;   // Consecutive evaluations in a zone before a partial sell fires (default 2)
 }
 
 export interface PoolHolding {
@@ -252,6 +267,9 @@ export interface PoolHolding {
     peakPrice: number;             // Highest price since entry
     peakPnlPct: number;            // Highest P&L % since entry (for trailing stop)
     boughtAt?: string;
+    // ─── GPM state (persisted per holding) ──────────────────────────────
+    gpmZone?: 'CONVICTION' | 'CAUTION' | 'DEFENSIVE';  // Current GPM tier
+    gpmZoneConsecutiveCycles?: number;                  // Consecutive evals in current zone (confirmation gate)
 }
 
 export interface PoolPerformance {
@@ -302,7 +320,9 @@ export interface ArenaPool {
     pauseReason?: string;
     selectionReasoning: string;
     weeklyReviews: WeeklyReview[];
-    lastSoldAt?: Record<string, string>;  // ISO timestamp per token — anti-wash tracking
+    lastSoldAt?: Record<string, string>;      // ISO timestamp per token — anti-wash tracking (all sells)
+    lastStopLossedAt?: Record<string, string>; // ISO timestamp per token — set ONLY on stop-loss exits (shorter re-entry cooldown)
+    stopLossExitPrices?: Record<string, number>; // Price at which each token was stop-lossed — used by Phase C Rebound Watch
 
     // ─── SCORE MEMORY ─────────────────────────────────────────────────
     // Last N scores per token, persisted across cron cycles.

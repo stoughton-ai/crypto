@@ -44,11 +44,7 @@ export default function MissionSelector({ cards }: Props) {
                 ◈ Select Arena
             </div>
 
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                gap: '12px',
-            }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {cards.map(card => {
                     const theme = ARENA_THEME[card.assetClass];
                     const status = STATUS_CONFIG[card.status];

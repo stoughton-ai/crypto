@@ -322,7 +322,19 @@ export function updatePoolPerformance(
         : 0;
 }
 
-/** Record a daily snapshot for a pool. */
+/**
+ * Record a daily snapshot for a pool.
+ *
+ * Writes to TWO places:
+ *   1. arena_snapshots/{userId}/{poolId}/{date}   — sub-collection for audit/query
+ *   2. arena_config.pools[poolId].performance.dailySnapshots — embedded array the
+ *      performance chart reads. Without this second write the chart only ever has
+ *      2 points (Start + Today) because getPerformanceHistory reads from this array.
+ *
+ * The array is keyed by date (YYYY-MM-DD). We upsert: if an entry for today
+ * already exists we overwrite it with the latest value; otherwise we append.
+ * Called every 3-minute cron cycle, so multiple calls per day are safe.
+ */
 export async function recordDailySnapshot(
     userId: string,
     poolId: PoolId,
@@ -332,6 +344,8 @@ export async function recordDailySnapshot(
 ): Promise<void> {
     if (!adminDb) return;
     const today = new Date().toISOString().split('T')[0];
+
+    // ── 1. Sub-collection write (existing behaviour, audit trail) ──
     const docRef = adminDb.collection(col(assetClass).snapshots)
         .doc(userId)
         .collection(poolId)
@@ -343,6 +357,37 @@ export async function recordDailySnapshot(
         pnlPct,
         recordedAt: new Date().toISOString(),
     }, { merge: true });
+
+    // ── 2. Upsert into arena_config embedded array (what the chart reads) ──
+    try {
+        const arena = await getArenaConfig(userId, assetClass);
+        if (!arena) return;
+
+        const poolIdx = arena.pools.findIndex(p => p.poolId === poolId);
+        if (poolIdx < 0) return;
+
+        const pool = arena.pools[poolIdx];
+        const snaps = pool.performance.dailySnapshots || [];
+
+        // Upsert by date
+        const existingIdx = snaps.findIndex(s => s.date === today);
+        const entry = { date: today, value, pnlPct };
+        if (existingIdx >= 0) {
+            snaps[existingIdx] = entry;
+        } else {
+            snaps.push(entry);
+        }
+
+        // Keep last 30 entries max (28-day arena + buffer) — oldest first
+        snaps.sort((a, b) => a.date.localeCompare(b.date));
+        pool.performance.dailySnapshots = snaps.slice(-30);
+
+        arena.pools[poolIdx] = pool;
+        await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
+    } catch (e: any) {
+        // Non-fatal — sub-collection write already succeeded
+        console.warn(`[Arena] recordDailySnapshot embedded write failed for ${poolId}: ${e.message}`);
+    }
 }
 
 
@@ -434,6 +479,7 @@ export async function executePoolSell(
     marketContext: ArenaTradeRecord['marketContext'],
     preTradeReflection: string,
     assetClass: AssetClass = 'CRYPTO',
+    skipAntiWash: boolean = false, // GPM partial sells: true (token still held, no wash risk)
 ): Promise<{ success: boolean; trade?: ArenaTradeRecord; pnl?: number; pnlPct?: number; error?: string }> {
     if (!adminDb) return { success: false, error: 'Admin SDK not initialized' };
 
@@ -461,9 +507,25 @@ export async function executePoolSell(
         };
     }
 
-    // Record sell timestamp for anti-wash enforcement
-    if (!pool.lastSoldAt) pool.lastSoldAt = {};
-    pool.lastSoldAt[upperTicker] = new Date().toISOString();
+    // Record sell timestamp for anti-wash enforcement (applies to ALL full/regular sells).
+    // GPM partial sells skip this — the token is still held, so there is no wash-trade risk,
+    // and blocking re-buys would prevent the scale-up recovery path from working.
+    if (!skipAntiWash) {
+        if (!pool.lastSoldAt) pool.lastSoldAt = {};
+        pool.lastSoldAt[upperTicker] = new Date().toISOString();
+    }
+
+    // Record stop-loss exits separately — these use a shorter re-entry cooldown
+    // (stopLossReentryHours, default 6h) rather than the full antiWashHours (24h).
+    // Reason string always starts with "⛔ STOP-LOSS:" for hard stop-loss exits.
+    // Also record the exit price so Phase C (Rebound Watch) can compare without
+    // needing an extra Firestore trade-record lookup per cycle.
+    if (reason.includes('STOP-LOSS')) {
+        if (!pool.lastStopLossedAt) pool.lastStopLossedAt = {};
+        pool.lastStopLossedAt[upperTicker] = new Date().toISOString();
+        if (!pool.stopLossExitPrices) pool.stopLossExitPrices = {};
+        pool.stopLossExitPrices[upperTicker] = price; // fill price at the time of stop-loss
+    }
 
     pool.cashBalance += total;
     pool.performance.totalTrades++;

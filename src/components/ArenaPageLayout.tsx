@@ -31,10 +31,10 @@ export default function ArenaPageLayout({ assetClass, children }: Props) {
             <motion.div
                 initial={{ y: -20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
-                className="flex justify-between items-center mb-8"
+                className="flex justify-between items-center mb-8 flex-wrap gap-4"
             >
                 {/* Left: back + branding */}
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 flex-wrap">
                     <button
                         onClick={() => router.push("/")}
                         className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest font-outfit transition-colors"

@@ -1110,9 +1110,113 @@ Fear & Greed: ${fng}/100 (${marketStats?.fearGreedStatus || 'Unknown'})`;
               console.warn(`[Arena] ⚠️ Revolut SELL failed for ${upper} — arena state NOT updated`);
             }
           } else {
-            // Not selling — log the hold decision for visibility
-            const holdStatus = !isHoldMature ? ` ⏳ hold ${holdMinutes.toFixed(0)}/${minHoldMinutes}min` : '';
-            await setBrainStatus(userId, `${pool.emoji} 📊 ${upper}: HOLD at ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}% (peak: +${(holding.peakPnlPct || 0).toFixed(1)}%, TP: +${takeProfitTarget}%, SL: ${pool.strategy.positionStopLoss}%) — Score: ${smoothedScore} (raw: ${analysis.overallScore})${holdStatus}`);
+            // ─── GPM: GRADUATED POSITION MANAGEMENT ────────────────────────
+            // The position is not exiting via stop-loss/take-profit/trailing stop.
+            // GPM evaluates whether to partially reduce the holding (scale-down)
+            // or partially increase it (scale-up) based on smoothed AI score zones.
+            //
+            // ZONE TRANSITIONS require gpmConfirmationCycles consecutive evaluations
+            // below a boundary before any partial sell fires — this is the anti-churn gate.
+            const gpmEnabled = pool.strategy.gpmEnabled !== false; // default: true
+
+            if (gpmEnabled && isHoldMature) {
+              const gpmCautionScore = pool.strategy.gpmCautionZoneScore ?? 70;
+              const gpmDefensiveScore = pool.strategy.gpmDefensiveZoneScore ?? 55;
+              const gpmCautionPct = pool.strategy.gpmCautionPositionPct ?? 50;
+              const gpmDefensivePct = pool.strategy.gpmDefensivePositionPct ?? 25;
+              const gpmConfirmNeeded = pool.strategy.gpmConfirmationCycles ?? 2;
+              const maxAlloc = pool.strategy.maxAllocationPerToken;
+
+              // Resolve GPM zone from smoothed score:
+              //   CONVICTION: score >= gpmCautionScore (still strong, no need to reduce)
+              //   CAUTION:    gpmDefensiveScore <= score < gpmCautionScore (partial reduce to cautionPct)
+              //   DEFENSIVE:  score < gpmDefensiveScore (reduce hard to defensivePct)
+              const resolvedZone: 'CONVICTION' | 'CAUTION' | 'DEFENSIVE' =
+                smoothedScore >= gpmCautionScore ? 'CONVICTION' :
+                  smoothedScore >= gpmDefensiveScore ? 'CAUTION' :
+                    'DEFENSIVE';
+
+              const prevZone = holding.gpmZone ?? 'CONVICTION';
+              const prevCycles = holding.gpmZoneConsecutiveCycles ?? 0;
+
+              // Update consecutive cycle counter
+              const sameZone = resolvedZone === prevZone;
+              const newCycles = sameZone ? prevCycles + 1 : 1;
+              holding.gpmZone = resolvedZone;
+              holding.gpmZoneConsecutiveCycles = newCycles;
+
+              // Current holding value in USD
+              const holdingValueUsd = holding.amount * priceData.price;
+
+              // ── GPM SCALE-DOWN ──────────────────────────────────────────
+              // Fires when confirmed cycles in a lower zone exceed the threshold.
+              // Sells the excess above the zone's target allocation.
+              if (resolvedZone !== 'CONVICTION' && newCycles >= gpmConfirmNeeded) {
+                const targetPct = resolvedZone === 'CAUTION' ? gpmCautionPct : gpmDefensivePct;
+                const targetUsd = (targetPct / 100) * maxAlloc;
+                const excessUsd = holdingValueUsd - targetUsd;
+
+                if (excessUsd >= 10) { // minimum $10 to justify the spread cost
+                  const excessAmount = (excessUsd / priceData.price) * 0.995; // slippage buffer
+                  const gpmReason = `📉 GPM ${resolvedZone}: Score ${smoothedScore} confirmed ${newCycles}× (threshold: <${resolvedZone === 'CAUTION' ? gpmCautionScore : gpmDefensiveScore}). Reducing to ${targetPct}% of max allocation ($${targetUsd.toFixed(2)}). Selling $${excessUsd.toFixed(2)} excess.`;
+
+                  await setBrainStatus(userId, `${pool.emoji} 📉 GPM SCALE-DOWN ${upper}: Zone=${resolvedZone} (${newCycles}/${gpmConfirmNeeded} cycles). Selling $${excessUsd.toFixed(2)} → target $${targetUsd.toFixed(2)}`);
+                  console.log(`[Arena] ${pool.emoji} GPM scale-down: ${upper} → ${resolvedZone} (score ${smoothedScore}, cycle ${newCycles}/${gpmConfirmNeeded}), selling $${excessUsd.toFixed(2)}`);
+
+                  const revolutResult = await executeRevolutTrade(userId, upper, 'SELL', excessAmount, priceData.price);
+                  if (revolutResult.success) {
+                    const actualPrice = revolutResult.fillPrice || priceData.price;
+                    // skipAntiWash=true: token still held, no wash risk, don't block scale-up recovery
+                    const result = await executePoolSell(
+                      userId, pool, upper, excessAmount, actualPrice,
+                      gpmReason, marketContext, gpmReason, 'CRYPTO', true,
+                    );
+                    if (result.success && result.trade) {
+                      poolTrades.push(result.trade);
+                      // Reset consecutive cycle counter after acting — wait for next confirmation
+                      holding.gpmZoneConsecutiveCycles = 0;
+                      console.log(`[Arena] ${pool.emoji} ✅ GPM scale-down executed. P&L on sold portion: ${result.pnlPct?.toFixed(2)}%`);
+                    }
+                  } else {
+                    console.warn(`[Arena] ⚠️ Revolut GPM SELL failed for ${upper}`);
+                  }
+                } else {
+                  await setBrainStatus(userId, `${pool.emoji} 📉 GPM ${resolvedZone} confirmed for ${upper} but excess $${excessUsd.toFixed(2)} < $10 min — holding`);
+                }
+              }
+              // ── GPM SCALE-UP ────────────────────────────────────────────
+              // Fires when score recovers to CONVICTION and position is below full target.
+              // Queues a top-up buy into pendingBuys so Phase B handles sizing.
+              else if (resolvedZone === 'CONVICTION' && prevZone !== 'CONVICTION') {
+                const targetUsd = maxAlloc;
+                const topUpUsd = targetUsd - holdingValueUsd;
+                if (topUpUsd >= 10 && pool.cashBalance >= 10) {
+                  const scaleUpReflection = `📈 GPM SCALE-UP: ${upper} score recovered to ${smoothedScore} (CONVICTION zone ≥${gpmCautionScore}). Topping up from $${holdingValueUsd.toFixed(2)} → target $${targetUsd.toFixed(2)}. ${analysis.summary}`;
+                  const capped = Math.min(topUpUsd, pool.cashBalance);
+                  pendingBuys.push({
+                    ticker: upper,
+                    smoothedScore,
+                    price: priceData.price,
+                    buyAmount: capped / priceData.price,
+                    reflection: scaleUpReflection,
+                    marketContext,
+                  });
+                  await setBrainStatus(userId, `${pool.emoji} 📈 GPM SCALE-UP ${upper}: Recovered to CONVICTION (score ${smoothedScore}). Queuing $${capped.toFixed(2)} top-up.`);
+                  // Reset zone state to CONVICTION
+                  holding.gpmZone = 'CONVICTION';
+                  holding.gpmZoneConsecutiveCycles = 1;
+                }
+              } else {
+                // Still in same zone, not yet confirmed — just log
+                const zoneEmoji = resolvedZone === 'CONVICTION' ? '✅' : resolvedZone === 'CAUTION' ? '⚠️' : '🔴';
+                const holdStatus = !isHoldMature ? ` ⏳ hold ${holdMinutes.toFixed(0)}/${minHoldMinutes}min` : '';
+                await setBrainStatus(userId, `${pool.emoji} 📊 ${upper}: ${zoneEmoji} ${resolvedZone} (score ${smoothedScore}, ${newCycles}/${gpmConfirmNeeded} confirm cycles) | P&L ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%${holdStatus}`);
+              }
+            } else {
+              // GPM disabled or hold not mature — standard hold log
+              const holdStatus = !isHoldMature ? ` ⏳ hold ${holdMinutes.toFixed(0)}/${minHoldMinutes}min` : '';
+              await setBrainStatus(userId, `${pool.emoji} 📊 ${upper}: HOLD at ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}% (peak: +${(holding.peakPnlPct || 0).toFixed(1)}%, TP: +${takeProfitTarget}%, SL: ${pool.strategy.positionStopLoss}%) — Score: ${smoothedScore} (raw: ${analysis.overallScore})${holdStatus}`);
+            }
           }
         } else {
           // ─── BUY EVALUATION ───
@@ -1120,12 +1224,30 @@ Fear & Greed: ${fng}/100 (${marketStats?.fearGreedStatus || 'Unknown'})`;
           // Instead of executing immediately, push to pendingBuys so Phase B
           // can weight the allocation by conviction before executing.
           if (smoothedScore >= pool.strategy.buyScoreThreshold + buyConfidenceBuffer) {
-            // Anti-wash check
+            // ─── ANTI-WASH / RE-ENTRY COOLDOWN ────────────────────────────────
+            // Stop-loss exits use a SHORTER cooldown (stopLossReentryHours, default 6h)
+            // because they represent forced exits at a floor — the rebound is the
+            // signal we actually want to catch. Regular profitable exits (take-profit,
+            // trailing stop) still use the full antiWashHours (24h) to prevent wash-trading.
             const lastSold = pool.lastSoldAt?.[upper];
-            if (lastSold && pool.strategy.antiWashHours > 0) {
-              const hoursSinceSell = (Date.now() - new Date(lastSold).getTime()) / (1000 * 60 * 60);
-              if (hoursSinceSell < pool.strategy.antiWashHours) {
-                await setBrainStatus(userId, `${pool.emoji} 🚫 ${upper}: Anti-wash cooldown (sold ${hoursSinceSell.toFixed(1)}h ago, need ${pool.strategy.antiWashHours}h)`);
+            const lastStopLossed = pool.lastStopLossedAt?.[upper];
+
+            // The last sell was a stop-loss if lastStopLossedAt timestamp >= lastSoldAt timestamp
+            const isLastSellStopLoss = !!lastStopLossed && (
+              !lastSold || new Date(lastStopLossed).getTime() >= new Date(lastSold).getTime()
+            );
+
+            const cooldownHours = isLastSellStopLoss
+              ? (pool.strategy.stopLossReentryHours ?? 6)  // Short re-entry for stop-loss exits
+              : pool.strategy.antiWashHours;               // Full anti-wash for profitable exits
+
+            const relevantTimestamp = isLastSellStopLoss ? lastStopLossed : lastSold;
+
+            if (relevantTimestamp && cooldownHours > 0) {
+              const hoursSinceSell = (Date.now() - new Date(relevantTimestamp).getTime()) / (1000 * 60 * 60);
+              if (hoursSinceSell < cooldownHours) {
+                const cooldownLabel = isLastSellStopLoss ? 'Stop-loss re-entry' : 'Anti-wash';
+                await setBrainStatus(userId, `${pool.emoji} 🚫 ${upper}: ${cooldownLabel} cooldown (${hoursSinceSell.toFixed(1)}h ago, need ${cooldownHours}h)`);
                 continue;
               }
             }
@@ -1250,7 +1372,110 @@ Fear & Greed: ${fng}/100 (${marketStats?.fearGreedStatus || 'Unknown'})`;
       }
     }
 
+    // ── Phase C: Rebound Watch — mechanical stop-loss re-entry ───────────
+    // Runs independently of the AI scoring system. Does NOT require score ≥ 90.
+    //
+    // Logic: for each token that was stopped out (lastStopLossedAt set) and has
+    // cleared its short cooldown (stopLossReentryHours, default 6h), check two
+    // mechanical gates:
+    //   1. Price recovery: currentPrice > stopLossExitPrice × (1 + reboundEntryPct/100)
+    //      Confirms the asset has genuinely bounced above where we sold, not just
+    //      spiked intraday while still in a downtrend.
+    //   2. RSI floor: RSI(14) > reboundRsiMin (default 35)
+    //      Filters dead-cat bounces — if RSI is still below 35 the asset is in
+    //      sustained selling pressure and re-entry would be premature.
+    //
+    // If both gates pass, execute a standard buy and clear the stop-loss flags
+    // so the token returns to normal scoring in the next cycle.
+    {
+      const reboundEntryPct = pool.strategy.reboundEntryPct ?? 1.5;
+      const reboundRsiMin = pool.strategy.reboundRsiMin ?? 35;
+      const slReentryHours = pool.strategy.stopLossReentryHours ?? 6;
+
+      for (const ticker of pool.tokens) {
+        const upper = ticker.toUpperCase();
+
+        // Only run for tokens that were stop-lossed (flag must exist)
+        const lastStopLossed = pool.lastStopLossedAt?.[upper];
+        if (!lastStopLossed) continue;
+
+        // Skip if already holding this token (Phase B may have bought it)
+        if (pool.holdings[upper]?.amount > 0) continue;
+
+        // Skip if Phase B queued a pending buy for this token this cycle
+        if (pendingBuys.some(b => b.ticker === upper)) continue;
+
+        // Cooldown gate — must have passed stopLossReentryHours since the stop-loss
+        const hoursSinceStopLoss = (Date.now() - new Date(lastStopLossed).getTime()) / (1000 * 60 * 60);
+        if (hoursSinceStopLoss < slReentryHours) continue;
+
+        // Need a valid current price
+        const priceData = prices[upper];
+        if (!priceData || priceData.price <= 0) continue;
+
+        // Need the exit price to compute recovery
+        const exitPrice = pool.stopLossExitPrices?.[upper];
+        if (!exitPrice || exitPrice <= 0) continue;
+
+        // Gate 1: Price recovery above exit price + threshold
+        const recoveryPct = ((priceData.price - exitPrice) / exitPrice) * 100;
+        const recoveryTarget = reboundEntryPct; // e.g. 1.5%
+
+        if (recoveryPct < recoveryTarget) {
+          await setBrainStatus(userId, `${pool.emoji} 📡 REBOUND WATCH ${upper}: Price $${priceData.price.toFixed(4)} needs +${recoveryTarget}% above exit $${exitPrice.toFixed(4)} (currently ${recoveryPct >= 0 ? '+' : ''}${recoveryPct.toFixed(2)}%)`);
+          continue;
+        }
+
+        // Gate 2: RSI floor — avoid re-entering still-falling assets
+        const tech = techDataWithPrices[upper];
+        const rsi = tech?.rsi14 ?? 50; // default neutral if no data
+        if (rsi < reboundRsiMin) {
+          await setBrainStatus(userId, `${pool.emoji} 📡 REBOUND WATCH ${upper}: RSI ${rsi.toFixed(1)} below floor ${reboundRsiMin} — rebound not confirmed yet`);
+          continue;
+        }
+
+        // Both gates passed — execute mechanical re-entry at standard pool sizing
+        const availableCash = pool.cashBalance;
+        const maxAlloc = pool.strategy.maxAllocationPerToken;
+        const buyUsd = Math.min(availableCash, maxAlloc);
+
+        if (buyUsd < 10) {
+          await setBrainStatus(userId, `${pool.emoji} 📡 REBOUND WATCH ${upper}: Insufficient cash ($${availableCash.toFixed(2)}) for re-entry`);
+          continue;
+        }
+
+        const buyAmount = buyUsd / priceData.price;
+        const reboundReason = `⚡ REBOUND RE-ENTRY: ${upper} recovered +${recoveryPct.toFixed(2)}% above stop-loss exit $${exitPrice.toFixed(4)} (threshold: +${recoveryTarget}%). RSI ${rsi.toFixed(1)} (floor: ${reboundRsiMin}). Held ${hoursSinceStopLoss.toFixed(1)}h since stop-loss.`;
+
+        await setBrainStatus(userId, `${pool.emoji} ⚡ REBOUND RE-ENTRY: ${upper} at $${priceData.price.toFixed(4)} (+${recoveryPct.toFixed(2)}% above exit, RSI ${rsi.toFixed(1)}). Buying $${buyUsd.toFixed(2)}.`);
+        console.log(`[Arena] ${pool.emoji} Phase C (Rebound Watch): ${upper} qualified — recovery +${recoveryPct.toFixed(2)}%, RSI ${rsi.toFixed(1)}, buying $${buyUsd.toFixed(2)}`);
+
+        const reboundMarketContext = {
+          btcPrice, btcChange24h: btcChange,
+          tokenChange24h: priceData.change24h, fearGreedIndex: fng,
+        };
+
+        const revolutResult = await executeRevolutTrade(userId, upper, 'BUY', buyAmount, priceData.price);
+        if (revolutResult.success) {
+          const actualPrice = revolutResult.fillPrice || priceData.price;
+          const result = await executePoolBuy(userId, pool, upper, buyAmount, actualPrice, reboundReason, reboundMarketContext, reboundReason);
+          if (result.success && result.trade) {
+            poolTrades.push(result.trade);
+            // Clear stop-loss flags — token is back in normal cycle
+            if (pool.lastStopLossedAt) delete pool.lastStopLossedAt[upper];
+            if (pool.stopLossExitPrices) delete pool.stopLossExitPrices[upper];
+            // Also reset lastSoldAt so the normal anti-wash doesn't then block it again
+            if (pool.lastSoldAt) delete pool.lastSoldAt[upper];
+            console.log(`[Arena] ${pool.emoji} ✅ Rebound re-entry executed for ${upper}. Stop-loss flags cleared.`);
+          }
+        } else {
+          console.warn(`[Arena] ⚠️ Revolut REBOUND BUY failed for ${upper} — flags NOT cleared`);
+        }
+      }
+    } // end Phase C
+
     // Update pool performance
+
     updatePoolPerformance(pool, prices);
     const totalValue = getPoolTotalValue(pool, prices);
 
@@ -1402,17 +1627,20 @@ ${weekTrades.length > 5 ? '🚨 TOO MANY TRADES — reduce activity further' : '
 CURRENT STRATEGY:
 Signal: Buy=${pool.strategy.buyScoreThreshold}, Exit=${pool.strategy.exitThreshold}, TP=${pool.strategy.takeProfitTarget || 8}%, Trail=${pool.strategy.trailingStopPct || 2}%, SL=${pool.strategy.positionStopLoss}%
 Execution: Hold=${pool.strategy.minHoldMinutes ?? 360}min, Cooldown=${pool.strategy.evaluationCooldownMinutes ?? 60}min, BuyBuf=${pool.strategy.buyConfidenceBuffer ?? 5}, ExitHyst=${pool.strategy.exitHysteresis ?? 10}, SizeMult=${pool.strategy.positionSizeMultiplier ?? 0.9}, Personality=${pool.strategy.strategyPersonality || 'PATIENT'}
-Other: Momentum=${pool.strategy.momentumGateEnabled}(${pool.strategy.momentumGateThreshold}%), AntiWash=${pool.strategy.antiWashHours}h, MaxAlloc=$${pool.strategy.maxAllocationPerToken}
+Other: Momentum=${pool.strategy.momentumGateEnabled}(${pool.strategy.momentumGateThreshold}%), AntiWash=${pool.strategy.antiWashHours}h (SL re-entry: ${pool.strategy.stopLossReentryHours ?? 6}h), MaxAlloc=$${pool.strategy.maxAllocationPerToken}
+Rebound Watch: ReboundEntry=+${pool.strategy.reboundEntryPct ?? 1.5}% above exit price, RSI floor=${pool.strategy.reboundRsiMin ?? 35}
+GPM: Enabled=${pool.strategy.gpmEnabled !== false}, CautionAt=${pool.strategy.gpmCautionZoneScore ?? 70}(→${pool.strategy.gpmCautionPositionPct ?? 50}%), DefensiveAt=${pool.strategy.gpmDefensiveZoneScore ?? 55}(→${pool.strategy.gpmDefensivePositionPct ?? 25}%), Confirm=${pool.strategy.gpmConfirmationCycles ?? 2}cycles
 Description: ${pool.strategy.description}
 
 RECENT TRADES:
 ${weekTrades.slice(0, 15).map(t => `${t.type} ${t.ticker} $${t.total.toFixed(2)} ${t.pnl !== undefined ? (t.pnl >= 0 ? '✅' : '❌') + ' ' + (t.pnlPct?.toFixed(1) || '?') + '%' : ''} — ${t.reason.substring(0, 100)}`).join('\\\\n') || 'No trades since last review.'}
 
 REGIME RULES (YOU CANNOT OVERRIDE THESE):
-- AI score-based exits (Exit Path 4) are DISABLED. Positions only exit via: Take-Profit (8%+), Stop-Loss (-8%), or Trailing Stop.
+- AI score-based FULL exits (Exit Path 4) are DISABLED. Full exits only via: Take-Profit (8%+), Stop-Loss (-8%), or Trailing Stop.
+- GPM partial scale-downs ARE enabled: positions reduce proportionally when score drops below gpmCautionZoneScore for gpmConfirmationCycles consecutive evaluations.
 - Minimum buy threshold: 85. Only enter on EXTREME conviction.
-- Minimum hold time: 360 minutes (6 hours). Positions need time to develop.
-- Minimum anti-wash: 24 hours. No re-buying recently sold tokens.
+- Minimum hold time: 360 minutes (6 hours). GPM only activates after the hold is mature.
+- Minimum anti-wash: 24 hours. This does NOT apply to GPM scale-up tops-ups (partial buybacks).
 - Personality is locked to PATIENT.
 - The BEST thing you can do is often NOTHING. Set strategyChanged=false if the current strategy is adequate.
 
@@ -1445,11 +1673,20 @@ Respond with ONLY valid JSON:
     "exitHysteresis": number (5-20),
     "positionSizeMultiplier": number (0.8-1.0),
     "strategyPersonality": "PATIENT",
+    "stopLossReentryHours": number (4-12, hours before re-buying a stop-lossed token — shorter than antiWashHours to catch rebounds),
+    "reboundEntryPct": number (0.5-5.0, % price must recover above stop-loss exit before Phase C fires — lower = more aggressive re-entry),
+    "reboundRsiMin": number (25-45, RSI floor for rebound re-entry — higher = more confirmation required before re-entering),
+    "gpmEnabled": boolean (true/false — enable/disable Graduated Position Management),
+    "gpmCautionZoneScore": number (60-80, score below which CAUTION fires — sell to gpmCautionPositionPct),
+    "gpmDefensiveZoneScore": number (40-65, score below which DEFENSIVE fires — sell to gpmDefensivePositionPct; must be < gpmCautionZoneScore),
+    "gpmCautionPositionPct": number (30-70, % of maxAllocation to hold in CAUTION zone),
+    "gpmDefensivePositionPct": number (10-40, % of maxAllocation to hold in DEFENSIVE zone; must be < gpmCautionPositionPct),
+    "gpmConfirmationCycles": number (1-4, consecutive evaluations required before a GPM scale-down fires — higher = less churn),
     "description": "Updated description reflecting patience regime"
   }
 }
 
-CONSTRAINTS: buyThreshold>=85. buy-exit gap>=25. antiWash>=24h. TP>=8%. SL<=-8%. Hold 360-480min. Cooldown 30-60min. Personality=PATIENT.
+CONSTRAINTS: buyThreshold>=85. buy-exit gap>=25. antiWash>=24h. stopLossReentry=4-12h. reboundEntry=0.5-5%. reboundRsi=25-45. gpmCaution=60-80. gpmDefensive=40-65. gpmCautionPct=30-70%. gpmDefensivePct=10-40%. gpmConfirm=1-4. TP>=8%. SL<=-8%. Hold 360-480min. Cooldown 30-60min. Personality=PATIENT.
 Prefer strategyChanged=false unless the numbers clearly warrant a change.`;
 
   try {
@@ -1499,6 +1736,23 @@ Prefer strategyChanged=false unless the numbers clearly warrant a change.`;
       ns.exitHysteresis = Math.max(5, Math.min(20, ns.exitHysteresis ?? 10));
       // positionSizeMultiplier: forced 1.0 — maximum capital usage on entries
       ns.positionSizeMultiplier = 1.0;
+      // stopLossReentryHours: 4-12h (shorter than antiWashHours so rebounding stop-losses can re-enter)
+      ns.stopLossReentryHours = Math.max(4, Math.min(12, ns.stopLossReentryHours ?? 6));
+      // reboundEntryPct: 0.5-5% (how much recovery above exit price Phase C requires)
+      ns.reboundEntryPct = Math.max(0.5, Math.min(5.0, ns.reboundEntryPct ?? 1.5));
+      // reboundRsiMin: 25-45 (RSI floor to confirm recovery is real)
+      ns.reboundRsiMin = Math.max(25, Math.min(45, ns.reboundRsiMin ?? 35));
+      // GPM parameters
+      ns.gpmEnabled = ns.gpmEnabled !== false; // default true
+      ns.gpmCautionZoneScore = Math.max(60, Math.min(80, ns.gpmCautionZoneScore ?? 70));
+      ns.gpmDefensiveZoneScore = Math.max(40, Math.min(65, ns.gpmDefensiveZoneScore ?? 55));
+      // Ensure defensive < caution (otherwise overlap)
+      if (ns.gpmDefensiveZoneScore >= ns.gpmCautionZoneScore) ns.gpmDefensiveZoneScore = ns.gpmCautionZoneScore - 10;
+      ns.gpmCautionPositionPct = Math.max(30, Math.min(70, ns.gpmCautionPositionPct ?? 50));
+      ns.gpmDefensivePositionPct = Math.max(10, Math.min(40, ns.gpmDefensivePositionPct ?? 25));
+      // Ensure defensive < caution allocation
+      if (ns.gpmDefensivePositionPct >= ns.gpmCautionPositionPct) ns.gpmDefensivePositionPct = ns.gpmCautionPositionPct - 10;
+      ns.gpmConfirmationCycles = Math.max(1, Math.min(4, ns.gpmConfirmationCycles ?? 2));
       // strategyPersonality: must be PATIENT under this regime
       ns.strategyPersonality = 'PATIENT';
       console.log(`[Arena] ✅ Patience regime guardrails enforced for ${pool.poolId} BEFORE Firestore write`);
@@ -1857,15 +2111,56 @@ export async function getPerformanceHistory(
       : await fetchSandboxArenaPrices([...allTokens], assetClass) as any;
   }
 
-  // Collect all unique dates across all pools' snapshots
+  // ── Build a per-pool snapshot map from BOTH sources ──────────────────────
+  // Source 1: pool.performance.dailySnapshots (embedded in arena config)
+  // Source 2: arena_snapshots Firestore sub-collection (populated since day 1)
+  // We merge them, preferring the sub-collection value when both exist for the
+  // same date (sub-collection is written with merge:true and is authoritative).
+  const { getArenaCollections: _cols } = await import('@/lib/constants');
+  const snapshotCols = _cols(assetClass);
+
+  // Map: poolId → { date → { value, pnlPct } }
+  const poolSnapshotMap: Record<string, Record<string, { value: number; pnlPct: number }>> = {};
+
+  await Promise.all(arena.pools.map(async pool => {
+    const byDate: Record<string, { value: number; pnlPct: number }> = {};
+
+    // Source 1: embedded array
+    for (const s of (pool.performance.dailySnapshots || [])) {
+      byDate[s.date] = { value: s.value, pnlPct: s.pnlPct };
+    }
+
+    // Source 2: Firestore sub-collection (authoritative, has historical data)
+    if (adminDb) {
+      try {
+        const snap = await adminDb
+          .collection(snapshotCols.snapshots)
+          .doc(userId)
+          .collection(pool.poolId)
+          .orderBy('date', 'desc')
+          .limit(30)
+          .get();
+        for (const doc of snap.docs) {
+          const d = doc.data();
+          if (d.date && typeof d.value === 'number') {
+            byDate[d.date] = { value: d.value, pnlPct: d.pnlPct ?? 0 };
+          }
+        }
+      } catch { /* non-fatal — fall back to embedded array only */ }
+    }
+
+    poolSnapshotMap[pool.poolId] = byDate;
+  }));
+
+  // Collect all unique dates across all pools
   const dateSet = new Set<string>();
-  arena.pools.forEach(pool => {
-    (pool.performance.dailySnapshots || []).forEach(s => dateSet.add(s.date));
+  Object.values(poolSnapshotMap).forEach(byDate => {
+    Object.keys(byDate).forEach(d => dateSet.add(d));
   });
 
   const sortedDates = [...dateSet].sort();
 
-  // If we have no snapshots yet, synthesise a "day 0" starting point
+  // Synthesise day-0 if not present
   const startDateStr = new Date(arena.startDate).toISOString().slice(0, 10);
   if (!dateSet.has(startDateStr)) sortedDates.unshift(startDateStr);
 
@@ -1898,18 +2193,18 @@ export async function getPerformanceHistory(
         value = pool.budget;
         pnlPct = 0;
       } else {
-        // Find snapshot closest to this date
-        const snap = (pool.performance.dailySnapshots || []).find(s => s.date === date);
-        if (snap) {
-          value = snap.value;
-          pnlPct = snap.pnlPct;
+        // Look up merged snapshot map
+        const byDate = poolSnapshotMap[pool.poolId] ?? {};
+        if (byDate[date]) {
+          value = byDate[date].value;
+          pnlPct = byDate[date].pnlPct;
         } else {
           // Interpolate from nearest prior snapshot
-          const prior = [...(pool.performance.dailySnapshots || [])]
-            .filter(s => s.date <= date)
-            .sort((a, b) => b.date.localeCompare(a.date))[0];
-          value = prior ? prior.value : pool.budget;
-          pnlPct = prior ? prior.pnlPct : 0;
+          const prior = Object.entries(byDate)
+            .filter(([d]) => d <= date)
+            .sort(([a], [b]) => b.localeCompare(a))[0];
+          value = prior ? prior[1].value : pool.budget;
+          pnlPct = prior ? prior[1].pnlPct : 0;
         }
       }
 

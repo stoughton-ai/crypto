@@ -117,16 +117,27 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
             for (const [t, h] of Object.entries(pool.holdings)) {
                 holdVal += h.amount * (prices[t.toUpperCase()]?.price || h.averagePrice);
             }
+            // Total liquid = cash (including dcaReserve) + holdings
+            // dcaReserve is ring-fenced inside cashBalance already, so total is correct.
             const total = pool.cashBalance + holdVal;
-            const pnl = total - pool.budget;
-            const pnlPct = pool.budget > 0 ? (pnl / pool.budget) * 100 : 0;
-            return { ...pool, total, pnl, pnlPct, idx };
+            // Cost basis = original budget + all DCA capital ever credited to this pool
+            const costBasis = pool.budget + (pool.dcaContributions ?? 0);
+            const pnl = total - costBasis;
+            const pnlPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+            return { ...pool, total, pnl, pnlPct, costBasis, idx };
         });
     }, [arena, prices]);
 
     const totalValue = poolValues.reduce((s, p) => s + p.total, 0);
-    const totalPnl = totalValue - POOL_COUNT * POOL_BUDGET;
-    const totalPnlPct = (totalPnl / (POOL_COUNT * POOL_BUDGET)) * 100;
+    const totalCostBasis = poolValues.reduce((s, p) => s + ((p as any).costBasis ?? p.budget), 0);
+    const totalDcaContributions = arena?.pools.reduce((s, p) => s + (p.dcaContributions ?? 0), 0) ?? 0;
+    const totalDcaReserve = arena?.pools.reduce((s, p) => s + (p.dcaReserve ?? 0), 0) ?? 0;
+    const totalDcaDeployed = arena?.pools.reduce((s, p) => s + (p.dcaDeployedTotal ?? 0), 0) ?? 0;
+    const hasDca = totalDcaContributions > 0;
+    // Use corrected cost basis for overall P&L calculation
+    const effectiveBasis = hasDca ? totalCostBasis : POOL_COUNT * POOL_BUDGET;
+    const totalPnl = totalValue - effectiveBasis;
+    const totalPnlPct = effectiveBasis > 0 ? (totalPnl / effectiveBasis) * 100 : 0;
     const leaderIdx = poolValues.reduce((b, p, i) => p.pnlPct > (poolValues[b]?.pnlPct ?? -Infinity) ? i : b, 0);
 
     // ── Arena-scoped clock (fully isolated per arena) ──
@@ -229,10 +240,10 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
             )}
 
             {/* ═ GLOBAL MISSION STATUS ═ */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
 
                 {/* Main PNL Block */}
-                <div className="mc-panel md:col-span-4 p-5 flex flex-col justify-between">
+                <div className="mc-panel md:col-span-1 lg:col-span-4 p-5 flex flex-col justify-between">
                     <div className="flex justify-between items-start mb-4">
                         <span className="mc-label">Net Asset Value (NAV)</span>
                         <StatusIndicator status={totalPnl >= 0 ? 'nominal' : 'critical'} />
@@ -245,13 +256,20 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                     </div>
                     <div className="mc-divider my-4" />
                     <div className="flex justify-between items-center">
-                        <span className="mc-label">BASE LINE CAPITAL</span>
-                        <span className="mc-value text-sm text-[#8a8f98]">{currency}{(POOL_COUNT * POOL_BUDGET).toFixed(2)}</span>
+                        <span className="mc-label">TOTAL INVESTED</span>
+                        <span className="mc-value text-sm text-[#8a8f98]">
+                            {currency}{effectiveBasis.toFixed(2)}
+                            {hasDca && (
+                                <span className="ml-1.5 text-[9px] font-bold text-[#4ba3e3] uppercase tracking-widest">
+                                    +{currency}{totalDcaContributions.toFixed(0)} DCA
+                                </span>
+                            )}
+                        </span>
                     </div>
                 </div>
 
                 {/* Telemetry Grid — Panel 1 & 2 are asset-class aware */}
-                <div className="grid grid-cols-2 gap-4 md:col-span-5">
+                <div className="grid grid-cols-2 gap-4 md:col-span-1 lg:col-span-5">
 
                     {/* Panel 1: BTC Oracle (crypto) | Top Holding (others) */}
                     {assetClass === 'CRYPTO' ? (
@@ -346,7 +364,7 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                 </div>
 
                 {/* Mission Clock */}
-                <div className="mc-panel md:col-span-3 p-4 flex flex-col justify-between border-l-4 border-l-[#0b5394]">
+                <div className="mc-panel md:col-span-2 lg:col-span-3 p-4 flex flex-col justify-between border-l-4 border-l-[#0b5394]">
                     <div className="flex justify-between items-start mb-4">
                         <div className="mc-label flex flex-col gap-0.5 leading-none">
                             <span>MISSION CLOCK</span>
@@ -379,8 +397,8 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                                     disabled={refreshing}
                                     title="Manually run one AI trading cycle now (bypasses cron schedule)"
                                     className={`px-2 py-1 border font-mono text-[9px] font-bold tracking-widest transition-colors ${refreshing
-                                            ? 'border-[#272a35] text-[#4ba3e3] opacity-60'
-                                            : 'border-[#0b5394] text-[#4ba3e3] hover:border-[#4ba3e3] hover:bg-[#0b5394]/20'
+                                        ? 'border-[#272a35] text-[#4ba3e3] opacity-60'
+                                        : 'border-[#0b5394] text-[#4ba3e3] hover:border-[#4ba3e3] hover:bg-[#0b5394]/20'
                                         }`}
                                 >
                                     {refreshing ? '⏳' : '▶ RUN'}
@@ -409,13 +427,64 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
 
             </div>
 
+            {/* ═ DCA STATUS STRIP ═ — only shown after first deposit */}
+            {hasDca && (
+                <div className="mc-panel border-l-4 border-l-[#4ba3e3] p-4">
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[#4ba3e3] text-lg">💰</span>
+                            <span className="mc-label text-[#4ba3e3] tracking-widest">DCA PROGRAMME</span>
+                        </div>
+                        <div className="flex flex-wrap gap-x-6 gap-y-2 ml-auto">
+                            <div className="text-center">
+                                <div className="mc-label text-[9px] text-[#8a8f98]">DEPOSITED</div>
+                                <div className="mc-value text-base text-white font-bold">{currency}{totalDcaContributions.toFixed(2)}</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="mc-label text-[9px] text-[#8a8f98]">DEPLOYED</div>
+                                <div className="mc-value text-base text-[#4caf50] font-bold">{currency}{totalDcaDeployed.toFixed(2)}</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="mc-label text-[9px] text-[#8a8f98]">IN RESERVE</div>
+                                <div className="mc-value text-base text-[#ffb74d] font-bold">{currency}{totalDcaReserve.toFixed(2)}</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="mc-label text-[9px] text-[#8a8f98]">DEPLOY TRIGGER</div>
+                                <div className="mc-value text-[11px] text-[#8a8f98]">Score ≥ 85</div>
+                            </div>
+                        </div>
+                    </div>
+                    {/* Per-pool reserve bars */}
+                    {totalDcaReserve > 0 && (
+                        <div className="mt-4 pt-4 border-t border-[#272a35] grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            {arena?.pools.map(p => {
+                                const reserve = p.dcaReserve ?? 0;
+                                const contrib = p.dcaContributions ?? 0;
+                                if (contrib === 0) return null;
+                                const pct = contrib > 0 ? (reserve / contrib) * 100 : 0;
+                                return (
+                                    <div key={p.poolId}>
+                                        <div className="flex justify-between mb-1">
+                                            <span className="mc-label text-[9px]">{p.emoji} {p.name.toUpperCase()}</span>
+                                            <span className="mc-value text-[9px] text-[#ffb74d]">{currency}{reserve.toFixed(2)}</span>
+                                        </div>
+                                        <TelemetryBar pct={pct} colorClass="bg-[#4ba3e3]" />
+                                        <div className="text-[8px] text-[#555] mt-0.5 text-right">{pct.toFixed(0)}% undeployed</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* ═ STRATEGY MODULES ═ */}
             <div className="mc-label flex items-center gap-3 pt-4">
                 <span>STRATEGY DEPLOYMENT TELEMETRY</span>
                 <div className="h-px bg-[#272a35] flex-1"></div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {poolValues.map((pool, i) => {
                     const isLeader = i === leaderIdx;
                     const isActive = activePool === pool.poolId;
@@ -456,10 +525,16 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                                 {/* Progress bar representing budget vs value */}
                                 <div className="mb-5">
                                     <div className="flex justify-between mb-1">
-                                        <span className="mc-value text-[10px] text-[#8a8f98]">BUDGET: ${pool.budget}</span>
+                                        <span className="mc-value text-[10px] text-[#8a8f98]">COST: ${(pool as any).costBasis?.toFixed(2) ?? pool.budget}</span>
                                         <span className="mc-value text-[10px] text-[#8a8f98]">LIQUID: ${pool.cashBalance.toFixed(2)}</span>
                                     </div>
-                                    <TelemetryBar pct={(pool.total / pool.budget) * 100} colorClass={isProfitable ? 'bg-[#2e7d32]' : 'bg-[#d32f2f]'} />
+                                    <TelemetryBar pct={(pool.total / ((pool as any).costBasis || pool.budget)) * 100} colorClass={isProfitable ? 'bg-[#2e7d32]' : 'bg-[#d32f2f]'} />
+                                    {(pool.dcaReserve ?? 0) > 0 && (
+                                        <div className="flex justify-between mt-1.5">
+                                            <span className="mc-label text-[9px] text-[#4ba3e3]">DCA RESERVE AWAITING DEPLOYMENT</span>
+                                            <span className="mc-value text-[9px] text-[#ffb74d] font-bold">${(pool.dcaReserve ?? 0).toFixed(2)}</span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Asset Table */}
@@ -586,7 +661,7 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                         </div>
 
                         {/* Pool Grades Grid */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-[#0a0a0c]/50 border-b border-[#272a35]">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-[#0a0a0c]/50 border-b border-[#272a35]">
                             {strategyReport.poolAnalyses.map((pa) => {
                                 const gradeColor = pa.grade === 'A' ? '#4caf50' : pa.grade === 'B' ? '#8bc34a' : pa.grade === 'C' ? '#ffb74d' : pa.grade === 'D' ? '#ff9800' : '#ff6659';
                                 const vsBtc = pa.vsBtc ?? 0;
@@ -709,45 +784,47 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                         </div>
                     ) : (
                         <>
-                            <table className="w-full text-left font-mono text-xs border-collapse">
-                                <thead className="bg-[#121318] border-b border-[#272a35]">
-                                    <tr>
-                                        <th className="py-3 px-4 text-[#8a8f98] font-normal">TIMESTAMP</th>
-                                        <th className="py-3 px-4 text-[#8a8f98] font-normal">TYPE</th>
-                                        <th className="py-3 px-4 text-[#8a8f98] font-normal">ASSET</th>
-                                        <th className="py-3 px-4 text-[#8a8f98] font-normal">UNIT</th>
-                                        <th className="py-3 px-4 text-[#8a8f98] font-normal text-right">TOTAL (USD)</th>
-                                        <th className="py-3 px-4 text-[#8a8f98] font-normal text-right">PNL</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {trades.slice(ledgerPage * TRADES_PER_PAGE, (ledgerPage + 1) * TRADES_PER_PAGE).map((t, i) => {
-                                        const isBuy = t.type === 'BUY';
-                                        const dateStr = new Date(t.date || Date.now()).toISOString().replace('T', ' ').substring(0, 19);
-                                        return (
-                                            <tr key={i} className="border-b border-[#272a35] hover:bg-[#121318] transition-colors">
-                                                <td className="py-3 px-4 text-[#8a8f98]">{dateStr}</td>
-                                                <td className={`py-3 px-4 font-bold ${isBuy ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>{t.type}</td>
-                                                <td className="py-3 px-4 text-white">
-                                                    {t.ticker}
-                                                    <span className="text-[#8a8f98] text-[9px] ml-2 block sm:inline">({t.poolName})</span>
-                                                </td>
-                                                <td className="py-3 px-4 text-[#e2e4e9]">{t.amount.toFixed(4)} @ ${fmtPrice(t.price)}</td>
-                                                <td className="py-3 px-4 text-white text-right font-bold">${t.total.toFixed(2)}</td>
-                                                <td className="py-3 px-4 text-right">
-                                                    {t.pnlPct !== undefined ? (
-                                                        <span className={`font-bold ${t.pnlPct >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
-                                                            {fmtPct(t.pnlPct)}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-[#8a8f98]">--</span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        )
-                                    })}
-                                </tbody>
-                            </table>
+                            <div className="overflow-x-auto w-full">
+                                <table className="w-full text-left font-mono text-xs border-collapse">
+                                    <thead className="bg-[#121318] border-b border-[#272a35]">
+                                        <tr>
+                                            <th className="py-3 px-4 text-[#8a8f98] font-normal">TIMESTAMP</th>
+                                            <th className="py-3 px-4 text-[#8a8f98] font-normal">TYPE</th>
+                                            <th className="py-3 px-4 text-[#8a8f98] font-normal">ASSET</th>
+                                            <th className="py-3 px-4 text-[#8a8f98] font-normal">UNIT</th>
+                                            <th className="py-3 px-4 text-[#8a8f98] font-normal text-right">TOTAL (USD)</th>
+                                            <th className="py-3 px-4 text-[#8a8f98] font-normal text-right">PNL</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {trades.slice(ledgerPage * TRADES_PER_PAGE, (ledgerPage + 1) * TRADES_PER_PAGE).map((t, i) => {
+                                            const isBuy = t.type === 'BUY';
+                                            const dateStr = new Date(t.date || Date.now()).toISOString().replace('T', ' ').substring(0, 19);
+                                            return (
+                                                <tr key={i} className="border-b border-[#272a35] hover:bg-[#121318] transition-colors">
+                                                    <td className="py-3 px-4 text-[#8a8f98]">{dateStr}</td>
+                                                    <td className={`py-3 px-4 font-bold ${isBuy ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>{t.type}</td>
+                                                    <td className="py-3 px-4 text-white">
+                                                        {t.ticker}
+                                                        <span className="text-[#8a8f98] text-[9px] ml-2 block sm:inline">({t.poolName})</span>
+                                                    </td>
+                                                    <td className="py-3 px-4 text-[#e2e4e9]">{t.amount.toFixed(4)} @ ${fmtPrice(t.price)}</td>
+                                                    <td className="py-3 px-4 text-white text-right font-bold">${t.total.toFixed(2)}</td>
+                                                    <td className="py-3 px-4 text-right">
+                                                        {t.pnlPct !== undefined ? (
+                                                            <span className={`font-bold ${t.pnlPct >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                                                {fmtPct(t.pnlPct)}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[#8a8f98]">--</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
 
                             {/* Pagination Controls */}
                             {trades.length > TRADES_PER_PAGE && (
@@ -776,6 +853,6 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                 </div>
             </div>
 
-        </div>
+        </div >
     );
 }
