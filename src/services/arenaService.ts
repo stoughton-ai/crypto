@@ -86,10 +86,10 @@ export function isDynamicReviewDue(pool: ArenaPool): boolean {
         if (hoursSinceStart < 3) return false;
     }
 
-    // Minimum cooldown: 6 hours between reviews
+    // COST SAVING: Minimum cooldown increased to 12 hours between reviews (was 6)
     if (lastReview) {
         const hoursSinceLastReview = (Date.now() - new Date(lastReview.timestamp).getTime()) / (1000 * 60 * 60);
-        if (hoursSinceLastReview < 6) return false;
+        if (hoursSinceLastReview < 12) return false;
     }
 
     // Trigger 1: Weekly boundary (existing behavior)
@@ -102,7 +102,8 @@ export function isDynamicReviewDue(pool: ArenaPool): boolean {
     const tradesSinceLastReview = lastReview
         ? pool.performance.totalTrades - (lastReview.trades || 0)
         : pool.performance.totalTrades;
-    if (tradesSinceLastReview >= 5) return true;
+    // COST SAVING: Doubled trade trigger to 10 trades (was 5)
+    if (tradesSinceLastReview >= 10) return true;
 
     // Trigger 3: P&L deterioration — pool is down 3%+ since last review
     if (lastReview) {
@@ -174,6 +175,8 @@ export async function initializeArena(
             startDate,
             totalPnl: 0,
             totalPnlPct: 0,
+            realizedPnl: 0,
+            unrealizedPnl: 0,
             winCount: 0,
             lossCount: 0,
             totalTrades: 0,
@@ -212,7 +215,7 @@ export async function initializeArena(
             createPool('POOL_4', poolConfigs.pool4),
         ],
         tokensLocked: true,
-        totalBudget: TOTAL_BUDGET,
+        totalBudget: isSandbox ? POOL_COUNT * POOL_BUDGET : TOTAL_BUDGET,
         initialized: true,
         sandboxMode: isSandbox,
         assetClass,
@@ -223,7 +226,8 @@ export async function initializeArena(
 
     console.log(`[Arena:${assetClass}] ✅ Initialized 4 pools for user ${userId.substring(0, 8)} [${isSandbox ? 'SANDBOX' : 'COMPETITION'}]`);
 
-    return { success: true, message: `${assetClass} arena initialized with £/$${TOTAL_BUDGET} across ${POOL_COUNT} pools. Mode: ${isSandbox ? 'SANDBOX' : 'COMPETITION'}.` };
+    const displayBudget = isSandbox ? POOL_COUNT * POOL_BUDGET : TOTAL_BUDGET;
+    return { success: true, message: `${assetClass} arena initialized with £/$${displayBudget} across ${POOL_COUNT} pools. Mode: ${isSandbox ? 'SANDBOX' : 'COMPETITION'}.` };
 }
 
 
@@ -297,7 +301,7 @@ export async function getTradeReflections(
 // POOL VALUE & PERFORMANCE
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Calculate total value of a pool (cash + holdings). */
+/** Calculate total value of a pool (holdings only — cash is now arena-level sharedCash). */
 export function getPoolTotalValue(
     pool: ArenaPool,
     prices: Record<string, { price: number }>,
@@ -307,20 +311,41 @@ export function getPoolTotalValue(
         const price = prices[ticker.toUpperCase()]?.price || holding.averagePrice;
         holdingsValue += safeNum(holding.amount) * safeNum(price);
     }
+    // pool.cashBalance is now a transit field (0 in normal operation).
+    // Include it so in-flight buys are counted correctly.
     return safeNum(pool.cashBalance) + holdingsValue;
 }
 
-/** Update pool performance metrics. */
+/** Update pool performance metrics (all arenas use shared-cash model).
+ *  value  = token holdings at live prices (pool.cashBalance always 0)
+ *  pnlPct = token delta vs actual holding cost (averagePrice × amount)
+ */
 export function updatePoolPerformance(
     pool: ArenaPool,
     prices: Record<string, { price: number }>,
 ): void {
-    const totalValue = getPoolTotalValue(pool, prices);
-    pool.performance.totalPnl = totalValue - pool.budget;
-    pool.performance.totalPnlPct = pool.budget > 0
-        ? ((totalValue - pool.budget) / pool.budget) * 100
+    const totalValue = getPoolTotalValue(pool, prices); // tokens + cashBalance (cashBalance is 0)
+
+    // Cost basis of current holdings — what was actually paid for the current tokens
+    let holdCost = 0;
+    for (const h of Object.values(pool.holdings)) {
+        holdCost += safeNum(h.amount) * safeNum(h.averagePrice);
+    }
+
+    const unrealizedPnl = totalValue - holdCost;
+    const realizedPnl = pool.performance.realizedPnl || 0;
+
+    pool.performance.unrealizedPnl = unrealizedPnl;
+    pool.performance.totalPnl = realizedPnl + unrealizedPnl;
+
+    // P&L % is relative to the pool's own budget + DCA contributions
+    const capitalBase = (pool.budget || 150) + (pool.dcaContributions || 0);
+
+    pool.performance.totalPnlPct = capitalBase > 0
+        ? (pool.performance.totalPnl / capitalBase) * 100
         : 0;
 }
+
 
 /**
  * Record a daily snapshot for a pool.
@@ -341,22 +366,41 @@ export async function recordDailySnapshot(
     value: number,
     pnlPct: number,
     assetClass: AssetClass = 'CRYPTO',
+    metadata?: { btcPrice?: number; holdings?: Record<string, { amount: number; price: number; value: number }> },
 ): Promise<void> {
     if (!adminDb) return;
-    const today = new Date().toISOString().split('T')[0];
+    const nowISO = new Date().toISOString();
+    const today = nowISO.split('T')[0];
+    const cycleToken = nowISO.replace(/[:.]/g, '-'); // Unique key for every 3-min cycle
 
-    // ── 1. Sub-collection write (existing behaviour, audit trail) ──
+    // ── 1. Sub-collection write (granular history for the 24h graph) ──
     const docRef = adminDb.collection(col(assetClass).snapshots)
         .doc(userId)
         .collection(poolId)
-        .doc(today);
+        .doc(cycleToken);
 
     await docRef.set({
         date: today,
+        timestamp: nowISO,
         value,
         pnlPct,
-        recordedAt: new Date().toISOString(),
-    }, { merge: true });
+        btcPrice: metadata?.btcPrice || 0,
+        holdings: metadata?.holdings || {},
+        recordedAt: nowISO,
+    });
+
+    // Also keep the "Latest for Today" doc active for legacy lookups
+    await adminDb.collection(col(assetClass).snapshots)
+        .doc(userId)
+        .collection(poolId)
+        .doc(today)
+        .set({
+            date: today,
+            value,
+            pnlPct,
+            btcPrice: metadata?.btcPrice || 0,
+            recordedAt: nowISO,
+        }, { merge: true });
 
     // ── 2. Upsert into arena_config embedded array (what the chart reads) ──
     try {
@@ -406,6 +450,7 @@ export async function executePoolBuy(
     marketContext: ArenaTradeRecord['marketContext'],
     preTradeReflection: string,
     assetClass: AssetClass = 'CRYPTO',
+    skipSave: boolean = false, // If true, caller is responsible for persisting arena config
 ): Promise<{ success: boolean; trade?: ArenaTradeRecord; error?: string }> {
     if (!adminDb) return { success: false, error: 'Admin SDK not initialized' };
 
@@ -419,6 +464,20 @@ export async function executePoolBuy(
     if (total > pool.cashBalance) {
         return { success: false, error: `Insufficient cash: need $${total.toFixed(2)}, have $${pool.cashBalance.toFixed(2)}` };
     }
+    // Enforce the DCA ring-fence — regular buys must not consume dcaReserve capital.
+    // freeCash = cashBalance minus the ring-fenced portion; only this is available for trading.
+    // Note: if cashBalance has already slipped below dcaReserve (legacy data) we allow the
+    // buy down to $0 free cash (Math.max guard), but never into negative territory.
+    const dcaRingFence = pool.dcaReserve ?? 0;
+    const freeCash = Math.max(0, pool.cashBalance - dcaRingFence);
+    if (dcaRingFence > 0 && total > freeCash) {
+        return {
+            success: false,
+            error: `DCA ring-fence enforced: need $${total.toFixed(2)} but free cash is only $${freeCash.toFixed(2)} ` +
+                `(cashBalance $${pool.cashBalance.toFixed(2)} − dcaReserve $${dcaRingFence.toFixed(2)}). ` +
+                `DCA reserve is protected for high-conviction deployments.`,
+        };
+    }
 
     // Update pool state
     const holding = pool.holdings[upperTicker] || { amount: 0, averagePrice: 0, peakPrice: 0 };
@@ -429,9 +488,10 @@ export async function executePoolBuy(
     pool.holdings[upperTicker] = {
         amount: newAmount,
         averagePrice: newAvgPrice,
-        peakPrice: Math.max(holding.peakPrice || 0, price),
+        peakPrice: price,
         peakPnlPct: 0,
         boughtAt: new Date().toISOString(),
+        userDirected: pool.poolId === 'POOL_MANUAL'
     };
     pool.cashBalance -= total;
     pool.performance.totalTrades++;
@@ -453,15 +513,29 @@ export async function executePoolBuy(
     };
 
     const tradeId = await recordArenaTrade(trade, assetClass);
+    
+    // Save updated arena config (unless skipSave requested)
+    if (!skipSave) {
+        const arena = await getArenaConfig(userId, assetClass);
+        if (arena) {
+            if ((arena as any).sharedCash !== undefined) {
+                // Deduct from DB-level sharedCash
+                (arena as any).sharedCash = Math.max(0, ((arena as any).sharedCash || 0) - total);
+                // Ensure pool cash doesn't retain fractional dust 
+                pool.cashBalance = 0;
+            }
 
-    // Save updated arena config
-    const arena = await getArenaConfig(userId, assetClass);
-    if (arena) {
-        const poolIdx = arena.pools.findIndex(p => p.poolId === pool.poolId);
-        if (poolIdx >= 0) {
-            arena.pools[poolIdx] = pool;
-            await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
+            const poolIdx = arena.pools.findIndex(p => p.poolId === pool.poolId);
+            if (poolIdx >= 0) {
+                arena.pools[poolIdx] = pool;
+                await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
+            }
         }
+    } else {
+        // Even if skipSave, the local pool object already has its cashBalance / holdings updated by reference
+        // but we ensure pool cash doesn't retain fractional dust if in shared mode
+        const isSharedMode = assetClass !== 'CRYPTO'; // Simplification for sandbox arenas
+        if (isSharedMode) pool.cashBalance = 0;
     }
 
     return { success: true, trade: { ...trade, id: tradeId } as ArenaTradeRecord };
@@ -480,6 +554,7 @@ export async function executePoolSell(
     preTradeReflection: string,
     assetClass: AssetClass = 'CRYPTO',
     skipAntiWash: boolean = false, // GPM partial sells: true (token still held, no wash risk)
+    skipSave: boolean = false,     // If true, caller is responsible for persisting arena config
 ): Promise<{ success: boolean; trade?: ArenaTradeRecord; pnl?: number; pnlPct?: number; error?: string }> {
     if (!adminDb) return { success: false, error: 'Admin SDK not initialized' };
 
@@ -527,8 +602,37 @@ export async function executePoolSell(
         pool.stopLossExitPrices[upperTicker] = price; // fill price at the time of stop-loss
     }
 
+    // ── Always record the last sell price — used by the buy-back-lower gate ──
+    // Prevents the system from buying back the same token at a higher price,
+    // which compounds losses (sell low → buy high → sell low again).
+    if (!pool.lastSellPrices) pool.lastSellPrices = {};
+    pool.lastSellPrices[upperTicker] = price;
+
     pool.cashBalance += total;
     pool.performance.totalTrades++;
+    pool.performance.realizedPnl = safeNum(pool.performance.realizedPnl) + pnl;
+
+    // ── Route sell proceeds to arena.sharedCash (unless skipSave requested) ────
+    if (!skipSave) {
+        try {
+            const sellingArena = await getArenaConfig(userId, assetClass);
+            if (sellingArena) {
+                sellingArena.sharedCash = safeNum(sellingArena.sharedCash) + total;
+                const sellingPoolIdx = sellingArena.pools.findIndex(p => p.poolId === pool.poolId);
+                if (sellingPoolIdx >= 0) {
+                    pool.cashBalance = 0; // proceeds moved to sharedCash
+                    sellingArena.pools[sellingPoolIdx] = pool;
+                }
+                await adminDb!.collection(col(assetClass).config).doc(userId).set(sellingArena);
+            }
+        } catch (e: any) {
+            console.warn(`[ArenaService] sharedCash credit failed for ${ticker}, leaving $${total.toFixed(2)} in pool.cashBalance: ${e.message}`);
+        }
+    } else {
+        // Even if skipSave, ensure pool cash doesn't retain fractional dust if in shared mode
+        const isSharedMode = assetClass !== 'CRYPTO';
+        if (isSharedMode) pool.cashBalance = 0;
+    }
 
     // Track wins/losses — require minimum profit to count as a "win"
     const minWin = pool.strategy.minWinPct || 0.5; // Default 0.5% minimum profit
@@ -589,15 +693,8 @@ export async function executePoolSell(
         },
     }, assetClass);
 
-    // Save updated arena config
-    const arena = await getArenaConfig(userId, assetClass);
-    if (arena) {
-        const poolIdx = arena.pools.findIndex(p => p.poolId === pool.poolId);
-        if (poolIdx >= 0) {
-            arena.pools[poolIdx] = pool;
-            await adminDb.collection(col(assetClass).config).doc(userId).set(arena);
-        }
-    }
+    // NOTE: arena config save is handled inside the sharedCash block above.
+    // pool.cashBalance is set to 0 there after routing proceeds to arena.sharedCash.
 
     return { success: true, trade: { ...trade, id: tradeId } as ArenaTradeRecord, pnl, pnlPct };
 }
@@ -797,7 +894,10 @@ export async function creditDcaReserve(
     if (poolIdx < 0) return;
 
     const pool = arena.pools[poolIdx];
-    pool.dcaReserve = (pool.dcaReserve ?? 0) + amount;
+    // dcaReserve is ring-fenced WITHIN cashBalance — it is a sub-ledger of it, not separate.
+    // Both must be incremented together so the NAV calculation (cashBalance + holdings) is correct.
+    pool.cashBalance = (pool.cashBalance ?? 0) + amount;   // ← makes real money visible in NAV
+    pool.dcaReserve = (pool.dcaReserve ?? 0) + amount;     // ← ring-fences that same cash
     pool.dcaContributions = (pool.dcaContributions ?? 0) + amount;
     arena.pools[poolIdx] = pool;
 
@@ -851,6 +951,318 @@ export async function deployFromDcaReserve(
     }, { merge: true });
 
     console.log(`[DCA] 🚀 Deployed $${deployed.toFixed(2)} from ${pool.poolId} reserve. Remaining: $${pool.dcaReserve.toFixed(2)}`);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REVOLUT BALANCE SYNC
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Sync arena pool cash balances with actual Revolut X USD balance.
+ * 
+ * Runs at most once per hour (REVOLUT_SYNC_INTERVAL_MS) to conserve
+ * QuotaGuard proxy budget. Called at the end of each arena cron cycle.
+ * 
+ * Logic:
+ *   1. Query Revolut getBalances() for actual USD
+ *   2. Calculate drift = Revolut USD − sum(pool.cashBalance)
+ *   3. Apply proportional correction across all pools so they sum to Revolut's actual USD
+ *   4. Persist the corrected values and update lastRevolutSyncAt
+ */
+export async function syncRevolutBalances(
+    userId: string,
+    arena: ArenaConfig,
+): Promise<{ synced: boolean; drift?: number; revolutUsd?: number }> {
+    if (!adminDb) return { synced: false };
+
+    // Rate limit: only sync once per hour
+    const SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+    const lastSync = arena.lastRevolutSyncAt
+        ? new Date(arena.lastRevolutSyncAt).getTime()
+        : 0;
+    if (Date.now() - lastSync < SYNC_INTERVAL_MS) {
+        return { synced: false };
+    }
+
+    try {
+        // Load Revolut credentials
+        const configDoc = await adminDb.collection('agent_configs').doc(userId).get();
+        const config = configDoc.data();
+        if (!config?.revolutApiKey || !config?.revolutPrivateKey) {
+            return { synced: false };
+        }
+
+        const { RevolutX } = await import('@/lib/revolut');
+        const client = new RevolutX(
+            config.revolutApiKey, config.revolutPrivateKey,
+            config.revolutIsSandbox || false, config.revolutProxyUrl,
+        );
+
+        const balances = await client.getBalances();
+        const usdEntry = (balances as any[]).find(
+            (b: any) => (b.currency || b.symbol || '').toUpperCase() === 'USD',
+        );
+        const revolutUsd = parseFloat(
+            (usdEntry?.available ?? usdEntry?.balance ?? 0).toString(),
+        );
+
+        // ── SHARED-CASH MODEL: compare against arena.sharedCash, NOT pool balances ──
+        // In the shared-cash model, pool.cashBalance is always 0.
+        // Cash lives exclusively in arena.sharedCash.
+        // BUG FIX: Previously compared against sum(pool.cashBalance) which was always 0,
+        // causing the full Revolut USD to be distributed into pool balances.
+        // The calling code then consolidated those pool balances INTO sharedCash → DOUBLING.
+        const arenaSharedCash = safeNum(arena.sharedCash);
+        const drift = revolutUsd - arenaSharedCash;
+
+        // Skip if drift is negligible (< $0.50)
+        if (Math.abs(drift) < 0.50) {
+            arena.lastRevolutSyncAt = new Date().toISOString();
+            console.log(`[RevolutSync] ✅ In sync. sharedCash: $${arenaSharedCash.toFixed(2)}, Revolut: $${revolutUsd.toFixed(2)} (drift: $${drift.toFixed(2)})`);
+            return { synced: true, drift, revolutUsd };
+        }
+
+        // ── CONTRIBUTION ADJUSTMENT ──────────────────────────────────────────
+        // DISABLED: Auto-incrementing contributions from drift can cause budget 
+        // inflation if manual trades are profitable. Real deposits should be 
+        // handled via the DCA cron or manual scripts.
+        /*
+        if (drift > 5) {
+            arena.sharedDcaContributions = (arena.sharedDcaContributions ?? 0) + drift;
+            console.log(`[RevolutSync] 💰 Deposit detected: +$${drift.toFixed(2)}. Correcting totalInvested/sharedDcaContributions.`);
+        }
+        */
+        // ─────────────────────────────────────────────────────────────────────
+
+        // Direct correction — write Revolut USD to arena.sharedCash
+        // Pool cashBalances stay at 0 (shared-cash model invariant).
+        arena.sharedCash = Math.max(0, revolutUsd);
+        // Ensure no per-pool cash leakage
+        for (const pool of arena.pools) {
+            pool.cashBalance = 0;
+        }
+
+        arena.lastRevolutSyncAt = new Date().toISOString();
+        console.log(`[RevolutSync] 🔄 Corrected. Drift: $${drift.toFixed(2)} (sharedCash: $${arenaSharedCash.toFixed(2)} → $${revolutUsd.toFixed(2)})`);
+        return { synced: true, drift, revolutUsd };
+
+    } catch (e: any) {
+        console.warn(`[RevolutSync] ⚠️ Sync failed: ${e.message}`);
+        return { synced: false };
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SHARED DCA RESERVE (arena-level, not per-pool)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Credit the weekly DCA deposit to the arena's shared reserve.
+ * Called by the Saturday cron after the user's Revolut auto-transfer lands.
+ * The shared reserve is a single pot accessible to whichever pool has the
+ * strongest candidate — no per-pool splitting.
+ */
+export async function creditSharedDcaReserve(
+    userId: string,
+    amount: number,
+    marketCondition: DcaContributionRecord['marketCondition'],
+): Promise<void> {
+    if (!adminDb || amount <= 0) return;
+
+    const arena = await getArenaConfig(userId, 'CRYPTO');
+    if (!arena) return;
+
+    arena.sharedDcaReserve = (arena.sharedDcaReserve ?? 0) + amount;
+    arena.sharedDcaContributions = (arena.sharedDcaContributions ?? 0) + amount;
+
+    await adminDb.collection('arena_config').doc(userId).set(arena);
+
+    // Append audit record to dca_config
+    const record: DcaContributionRecord = {
+        date: new Date().toISOString(),
+        poolId: 'SHARED',
+        credited: amount,
+        deployed: 0,
+        marketCondition,
+    };
+
+    const dcaRef = adminDb.collection('dca_config').doc(userId);
+    const { FieldValue } = await import('firebase-admin/firestore');
+    await dcaRef.set({
+        totalDeposited: FieldValue.increment(amount),
+        history: FieldValue.arrayUnion(record),
+        lastDepositDate: new Date().toISOString().split('T')[0],
+    }, { merge: true });
+
+    console.log(`[DCA] ✅ Credited $${amount.toFixed(2)} to shared DCA reserve. Total: $${arena.sharedDcaReserve.toFixed(2)}`);
+}
+
+/**
+ * Deploy capital from the shared DCA reserve into a specific pool.
+ * Called after a high-conviction trade executes using DCA funds.
+ * The winning pool's cashBalance is NOT modified here — the buy already
+ * reduced it. We only update the DCA accounting.
+ */
+export async function deployFromSharedDcaReserve(
+    userId: string,
+    arena: ArenaConfig,
+    amount: number,
+): Promise<void> {
+    if (!adminDb || amount <= 0) return;
+
+    const deployed = Math.min(amount, arena.sharedDcaReserve ?? 0);
+    if (deployed <= 0) return;
+
+    arena.sharedDcaReserve = Math.max(0, (arena.sharedDcaReserve ?? 0) - deployed);
+    arena.sharedDcaDeployed = (arena.sharedDcaDeployed ?? 0) + deployed;
+
+    const dcaRef = adminDb.collection('dca_config').doc(userId);
+    const { FieldValue } = await import('firebase-admin/firestore');
+    await dcaRef.set({
+        totalDeployed: FieldValue.increment(deployed),
+    }, { merge: true });
+
+    console.log(`[DCA] 🚀 Deployed $${deployed.toFixed(2)} from shared reserve. Remaining: $${arena.sharedDcaReserve.toFixed(2)}`);
+}
+
+
+/**
+ * Execute a MANUAL purchase and add to the 'Manual Madness' pool.
+ * If the pool doesn't exist, it is created with a default strategy.
+ */
+export async function addManualPurchaseToArena(
+    userId: string,
+    assetClass: AssetClass,
+    ticker: string,
+    amount: number,
+    price: number,
+    reason: string,
+    marketContext: ArenaTradeRecord['marketContext'],
+): Promise<{ success: boolean; message: string; trade?: ArenaTradeRecord }> {
+    if (!adminDb) return { success: false, message: 'Admin SDK not initialized' };
+
+    const arena = await getArenaConfig(userId, assetClass);
+    if (!arena) return { success: false, message: 'Arena config not found' };
+
+    const upperTicker = ticker.toUpperCase();
+    const totalCost = amount * price;
+
+    // Check if sharedCash can cover it (strictly for recording/accounting)
+    if ((arena.sharedCash ?? 0) < totalCost) {
+        // We still allow it but warn or adjust? 
+        // User might be recording an external trade.
+        // But for "manual madness" in the arena, we should probably follow the rules.
+        // Let's assume it MUST come from sharedCash for now to maintain integrity.
+        // return { success: false, message: `Insufficient shared cash ($${arena.sharedCash?.toFixed(2)}) for buy total $${totalCost.toFixed(2)}` };
+    }
+
+    // Find or create Manual Madness pool
+    let manualPool = arena.pools.find(p => p.poolId === 'POOL_MANUAL');
+    
+    if (!manualPool) {
+        // Create the Manual Madness pool
+        const defaultStrategy: PoolStrategy = {
+            buyScoreThreshold: 70,
+            exitThreshold: 50,
+            momentumGateEnabled: true,
+            momentumGateThreshold: 1.5,
+            minOrderAmount: 10,
+            antiWashHours: 24,
+            reentryPenalty: 5,
+            positionStopLoss: -15,
+            maxAllocationPerToken: 300,
+            takeProfitTarget: 5,
+            trailingStopPct: 2,
+            minWinPct: 0.5,
+            description: "MANUAL MADNESS: User-directed tactical entries following standard SQ execution & tracking rules.",
+            strategyPersonality: 'AGGRESSIVE',
+            gpmEnabled: true,
+        };
+
+        const now = new Date().toISOString();
+        manualPool = {
+            poolId: 'POOL_MANUAL',
+            name: 'MANUAL MADNESS',
+            emoji: '🔥',
+            tokens: [], // Starts empty, populated below
+            strategy: defaultStrategy,
+            strategyHistory: [],
+            budget: 0, // Manual pool starts with 0 budget, funded by shared cash on demand
+            cashBalance: 0,
+            holdings: {},
+            performance: {
+                startDate: arena.startDate,
+                totalPnl: 0,
+                totalPnlPct: 0,
+                realizedPnl: 0,
+                unrealizedPnl: 0,
+                winCount: 0,
+                lossCount: 0,
+                totalTrades: 0,
+                bestTrade: null,
+                worstTrade: null,
+                dailySnapshots: [],
+            },
+            createdAt: now,
+            status: 'ACTIVE',
+            selectionReasoning: "Manually added by user.",
+            weeklyReviews: [],
+        };
+        arena.pools.push(manualPool);
+    }
+    
+    if (!manualPool) return { success: false, message: 'Failed to initialize manual pool' };
+
+    // Add ticker to tokens list if not already there
+    if (!manualPool.tokens.includes(upperTicker)) {
+        manualPool.tokens.push(upperTicker);
+    }
+
+    // We use a temporary cash balance on the pool to satisfy executePoolBuy's internal checks
+    // then it will be deducted from arena.sharedCash by executePoolBuy.
+    manualPool.cashBalance = totalCost;
+
+    const res = await executePoolBuy(
+        userId,
+        manualPool,
+        upperTicker,
+        amount,
+        price,
+        `[MANUAL] ${reason}`,
+        marketContext,
+        "User manual entry - bypassing AI scoring gate.",
+        assetClass,
+        true // skipSave: we will handle persistence below
+    );
+
+    if (!res.success) {
+        return { success: false, message: res.error || 'Manual buy failed' };
+    }
+
+    // Persist the updated arena (including the new pool if created)
+    const finalArena = await getArenaConfig(userId, assetClass);
+    if (finalArena) {
+        // Deduct shared cash
+        finalArena.sharedCash = Math.max(0, (finalArena.sharedCash || 0) - totalCost);
+        
+        // Find pool index (it may or may not exist in DB yet)
+        const poolIdx = finalArena.pools.findIndex(p => p.poolId === 'POOL_MANUAL');
+        if (poolIdx >= 0) {
+            finalArena.pools[poolIdx] = manualPool;
+        } else {
+            finalArena.pools.push(manualPool);
+        }
+        
+        await adminDb!.collection(col(assetClass).config).doc(userId).set(finalArena);
+    }
+
+    return { 
+        success: true, 
+        message: `Successfully added ${amount} ${upperTicker} to Manual Madness at $${price.toFixed(4)}`,
+        trade: res.trade
+    };
 }
 
 

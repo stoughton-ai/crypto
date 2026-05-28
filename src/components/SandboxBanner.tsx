@@ -10,9 +10,11 @@ interface Props {
     onCycleComplete?: () => void;
     onActivateCompetition?: () => void;
     isActivating?: boolean;
+    showAlert: (title: string, message: string, type: 'info' | 'success' | 'error') => void;
+    showConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-export default function SandboxBanner({ assetClass, onCycleComplete, onActivateCompetition, isActivating }: Props) {
+export default function SandboxBanner({ assetClass, onCycleComplete, onActivateCompetition, isActivating, showAlert, showConfirm }: Props) {
     const { user } = useAuth();
     const [running, setRunning] = useState(false);
     const [resetting, setResetting] = useState(false);
@@ -27,12 +29,14 @@ export default function SandboxBanner({ assetClass, onCycleComplete, onActivateC
             if (result.success) {
                 setLastResult(`✓ Cycle complete — ${result.totalTrades} trade(s) executed`);
                 onCycleComplete?.();
+                showAlert("Sandbox Cycle Complete", `${result.totalTrades} trades simulated in the ${assetClass} arena.`, "success");
             } else {
                 setLastResult(`⚠ Cycle finished with 0 trades (AI held positions)`);
             }
 
         } catch (e: any) {
             setLastResult(`✗ ${e.message}`);
+            showAlert("Cycle Fault", e.message, "error");
         } finally {
             setRunning(false);
         }
@@ -40,17 +44,24 @@ export default function SandboxBanner({ assetClass, onCycleComplete, onActivateC
 
     const handleReset = async () => {
         if (!user?.uid || resetting) return;
-        if (!confirm(`Reset ${assetClass} sandbox? This wipes all trades and holdings for this arena only.`)) return;
-        setResetting(true);
-        try {
-            await sandboxResetArena(user.uid, assetClass);
-            setLastResult('Sandbox reset complete.');
-            onCycleComplete?.();
-        } catch (e: any) {
-            setLastResult(`Reset failed: ${e.message}`);
-        } finally {
-            setResetting(false);
-        }
+        showConfirm(
+            "RESET SANDBOX ENVIRONMENT",
+            `Purge all ${assetClass} sandbox data? This will wipe your virtual trades and holdings. Competition data is unaffected.`,
+            async () => {
+                setResetting(true);
+                try {
+                    await sandboxResetArena(user.uid, assetClass);
+                    setLastResult('Sandbox reset complete.');
+                    onCycleComplete?.();
+                    showAlert("Sandbox Pureged", "Environment reset to baseline.", "success");
+                } catch (e: any) {
+                    setLastResult(`Reset failed: ${e.message}`);
+                    showAlert("Reset Error", e.message, "error");
+                } finally {
+                    setResetting(false);
+                }
+            }
+        );
     };
 
     return (

@@ -1,18 +1,19 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { RefreshCw, ChevronRight, Activity, Zap, Server, ShieldAlert, Shield } from "lucide-react";
-import { getArenaStatus, refreshArenaPrices, manualInitArena, getLatestStrategyReport, getPerformanceHistory, runSandboxArenaCycle, type StrategyReport, type PerformanceHistory } from "@/app/actions";
-import type { ArenaConfig, ArenaTradeRecord, PoolId, AssetClass } from "@/lib/constants";
-import { ARENA_START_DATE, ARENA_DURATION_DAYS, POOL_COUNT, POOL_BUDGET, ARENA_THEME, getCurrencySymbol, SANDBOX_ASSET_CLASSES } from "@/lib/constants";
+import { RefreshCw, ChevronRight, Activity, Zap, Server, ShieldAlert, Shield, X, HelpCircle, AlertCircle, TrendingDown, TrendingUp } from "lucide-react";
+import { getArenaStatus, refreshArenaPrices, manualInitArena, manualPurchase, getLatestStrategyReport, getWeeklyComparisonReport, getPerformanceHistory, runSandboxArenaCycle, resetMissionClock, syncFromRevolutAndReset, updateManualPositionSettings, executeManualSell, addToManualPosition, enableMasterPortfolioMode, manualRevolutSync, resetUserArena, activateSandboxCompetition, type StrategyReport, type WeeklyComparisonReport, type PerformanceHistory } from "@/app/actions";
+import type { ArenaConfig, ArenaTradeRecord, PoolId, AssetClass, TokenAnalysis } from "@/lib/constants";
+import { ARENA_START_DATE, ARENA_DURATION_DAYS, POOL_COUNT, POOL_BUDGET, ARENA_THEME, getCurrencySymbol, SANDBOX_ASSET_CLASSES, MOTHBALLED_ASSET_CLASSES } from "@/lib/constants";
 import AuditTrail from "@/components/AuditTrail";
 import PerformanceChart from "@/components/PerformanceChart";
 import SandboxBanner from "@/components/SandboxBanner";
+import IntegrityAlerts from "@/components/IntegrityAlerts";
+import IntelligenceScanner from "@/components/IntelligenceScanner";
+import ManualMadnessControls from "@/components/ManualMadnessControls";
 import { useAuth } from "@/context/AuthContext";
+import { getLatestDeepDiveReport, generateDeepDiveReport, type DeepDiveReport } from "@/app/deepDiveActions";
 
-// ─── Helpers ─────────────────────────────────────────────
-// Note: getDayNumber / getTimeRemaining removed — now computed inside the component
-// from arena.startDate / arena.endDate so each dashboard is fully isolated.
 function fmtPrice(n: number) {
     if (!n || n <= 0) return '0.00';
     if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -24,7 +25,6 @@ function fmtPct(n: number) {
     return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
-// ─── Mission Control UI Components ─────────────────────────
 function TelemetryBar({ pct, colorClass = 'bg-[#0b5394]' }: { pct: number, colorClass?: string }) {
     return (
         <div className="w-full h-1.5 bg-[#272a35] overflow-hidden">
@@ -46,10 +46,35 @@ function StatusIndicator({ status }: { status: 'nominal' | 'warning' | 'critical
     );
 }
 
-// ─── Main export ─────────────────────────────────────────
+function LivePrice({ value, currency }: { value: number, currency: string }) {
+    const [trend, setTrend] = useState<'up' | 'down' | null>(null);
+    const prevValueRef = React.useRef(value);
+
+    useEffect(() => {
+        if (value > prevValueRef.current) {
+            setTrend('up');
+            const timer = setTimeout(() => setTrend(null), 1000);
+            prevValueRef.current = value;
+            return () => clearTimeout(timer);
+        } else if (value < prevValueRef.current) {
+            setTrend('down');
+            const timer = setTimeout(() => setTrend(null), 1000);
+            prevValueRef.current = value;
+            return () => clearTimeout(timer);
+        }
+        prevValueRef.current = value;
+    }, [value]);
+
+    return (
+        <span className={`transition-all duration-500 rounded px-1 -mx-1 ${trend === 'up' ? 'bg-[#4caf50]/20 text-[#4caf50]' : trend === 'down' ? 'bg-[#ff6659]/20 text-[#ff6659]' : ''}`}>
+            {currency}{fmtPrice(value)}
+        </span>
+    );
+}
+
 interface ArenaDashboardProps {
-    userId?: string;       // Optional: resolved from AuthContext if not passed
-    assetClass?: AssetClass; // Defaults to CRYPTO
+    userId?: string;
+    assetClass?: AssetClass;
 }
 
 export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPTO' }: ArenaDashboardProps) {
@@ -70,105 +95,132 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
     const [tick, setTick] = useState(0);
     const [isInitializing, setIsInitializing] = useState(false);
     const [strategyReport, setStrategyReport] = useState<StrategyReport | null>(null);
+    const [weeklyReport, setWeeklyReport] = useState<WeeklyComparisonReport | null>(null);
     const [performanceHistory, setPerformanceHistory] = useState<PerformanceHistory | null>(null);
+    const [tokenAnalyses, setTokenAnalyses] = useState<TokenAnalysis[]>([]);
+
+    const [deepDiveReport, setDeepDiveReport] = useState<any>(null);
+    const [generatingDeepDive, setGeneratingDeepDive] = useState(false);
     const [ledgerPage, setLedgerPage] = useState(0);
     const [showAuditTrail, setShowAuditTrail] = useState(false);
+    const [showManualTrade, setShowManualTrade] = useState(false);
+    const [isActivating, setIsActivating] = useState(false);
+    const [smartAlert, setSmartAlert] = useState<{ 
+        title: string; 
+        message: string; 
+        type: 'info' | 'success' | 'error' | 'confirm';
+        onConfirm?: () => void;
+        onCancel?: () => void;
+    } | null>(null);
     const TRADES_PER_PAGE = 8;
 
-    // Live timer tick
+    const showAlert = (title: string, message: string, type: 'info' | 'success' | 'error' = 'info') => {
+        setSmartAlert({ title, message, type });
+    };
+
+    const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+        setSmartAlert({ 
+            title, 
+            message, 
+            type: 'confirm', 
+            onConfirm: () => { setSmartAlert(null); onConfirm(); },
+            onCancel: () => setSmartAlert(null)
+        });
+    };
+
     useEffect(() => {
         const i = setInterval(() => setTick(t => t + 1), 1000);
         return () => clearInterval(i);
     }, []);
 
     const loadData = useCallback(async () => {
+        if (!userId) return;
         try {
-            const [status, freshPrices, report] = await Promise.all([
+            const [status, freshPrices, report, deepDive] = await Promise.all([
                 getArenaStatus(userId, assetClass),
                 refreshArenaPrices(userId, assetClass),
                 getLatestStrategyReport(userId, assetClass),
+                getLatestDeepDiveReport(userId),
             ]);
-            setArena(status.arena);
+            
+            if (status.arena) {
+               setArena(status.arena);
+            }
+            setDeepDiveReport(deepDive);
+            setTokenAnalyses(status.tokenAnalyses || []);
             setTrades(status.trades);
             setMarket(status.marketStats);
             setEodhd(status.eodhd);
             if (report) setStrategyReport(report);
             setPrices(freshPrices);
-            // Fetch performance history (passes live prices to avoid a second fetch)
+            if (assetClass === 'CRYPTO') {
+                const weekly = await getWeeklyComparisonReport(userId);
+                if (weekly) setWeeklyReport(weekly);
+            }
             const history = await getPerformanceHistory(userId, freshPrices, assetClass);
             if (history) setPerformanceHistory(history);
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
         } finally {
             setLoading(false);
         }
     }, [userId, assetClass]);
 
-    useEffect(() => { loadData(); }, [loadData]);
+    const handleGenerateDeepDive = async () => {
+        setGeneratingDeepDive(true);
+        try {
+            const rep = await generateDeepDiveReport(userId);
+            setDeepDiveReport(rep || null);
+        } finally {
+            setGeneratingDeepDive(false);
+        }
+    };
+
+    useEffect(() => { if (userId) loadData(); }, [loadData, userId]);
     useEffect(() => {
+        if (!userId) return;
         const t = setInterval(loadData, 30000);
         return () => clearInterval(t);
-    }, [loadData]);
+    }, [loadData, userId]);
 
     const poolValues = useMemo(() => {
         if (!arena) return [];
         return arena.pools.map((pool, idx) => {
             let holdVal = 0;
+            let holdCost = 0;
             for (const [t, h] of Object.entries(pool.holdings)) {
-                holdVal += h.amount * (prices[t.toUpperCase()]?.price || h.averagePrice);
+                const currentPrice = prices[t.toUpperCase()]?.price || h.averagePrice;
+                holdVal  += h.amount * currentPrice;
+                holdCost += h.amount * h.averagePrice;
             }
-            // Total liquid = cash (including dcaReserve) + holdings
-            // dcaReserve is ring-fenced inside cashBalance already, so total is correct.
-            const total = pool.cashBalance + holdVal;
-            // Cost basis = original budget + all DCA capital ever credited to this pool
-            const costBasis = pool.budget + (pool.dcaContributions ?? 0);
+            const total = holdVal;
+            const costBasis = holdCost;
             const pnl = total - costBasis;
             const pnlPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
             return { ...pool, total, pnl, pnlPct, costBasis, idx };
         });
     }, [arena, prices]);
 
-    const totalValue = poolValues.reduce((s, p) => s + p.total, 0);
-    const totalCostBasis = poolValues.reduce((s, p) => s + ((p as any).costBasis ?? p.budget), 0);
-    const totalDcaContributions = arena?.pools.reduce((s, p) => s + (p.dcaContributions ?? 0), 0) ?? 0;
-    const totalDcaReserve = arena?.pools.reduce((s, p) => s + (p.dcaReserve ?? 0), 0) ?? 0;
-    const totalDcaDeployed = arena?.pools.reduce((s, p) => s + (p.dcaDeployedTotal ?? 0), 0) ?? 0;
-    const hasDca = totalDcaContributions > 0;
-    // Use corrected cost basis for overall P&L calculation
-    const effectiveBasis = hasDca ? totalCostBasis : POOL_COUNT * POOL_BUDGET;
+    const sharedCash = arena?.sharedCash ?? 0;
+    const totalHoldingValue = poolValues.reduce((s, p) => s + p.total, 0);
+    const totalValue = totalHoldingValue + sharedCash;
+    const totalCash = sharedCash;
+    const arenaBudget = arena?.totalBudget ?? (POOL_COUNT * POOL_BUDGET);
+    const totalDcaContributions = arena?.sharedDcaContributions ?? 0;
+    const totalDcaReserve = arena?.sharedDcaReserve ?? 0;
+    const totalDcaDeployed = arena?.sharedDcaDeployed ?? 0;
+    const effectiveBasis = arenaBudget + totalDcaContributions;
     const totalPnl = totalValue - effectiveBasis;
     const totalPnlPct = effectiveBasis > 0 ? (totalPnl / effectiveBasis) * 100 : 0;
+    const hasDca = totalDcaContributions > 0 || totalDcaReserve > 0;
     const leaderIdx = poolValues.reduce((b, p, i) => p.pnlPct > (poolValues[b]?.pnlPct ?? -Infinity) ? i : b, 0);
-
-    // ── Arena-scoped clock (fully isolated per arena) ──
-    // isSandbox = true when still in sandbox mode (non-crypto + not yet in competition)
-    // Once competition is activated arena.competitionMode = true → switches to T-minus countdown
+    const origTokenPct = totalValue > 0 ? (totalHoldingValue / totalValue) * 100 : 0;
+    const freeCashPct = totalValue > 0 ? (totalCash / totalValue) * 100 : 0;
     const isSandbox = isNonCryptoClass && !(arena?.competitionMode);
 
-    const arenaStartMs = arena?.startDate ? new Date(arena.startDate).getTime() : 0;
-    const arenaEndMs = arena?.endDate ? new Date(arena.endDate).getTime() : arenaStartMs + ARENA_DURATION_DAYS * 86400000;
-    const arenaDay = arenaStartMs
-        ? Math.max(1, Math.min(Math.floor((Date.now() - arenaStartMs) / 86400000) + 1, ARENA_DURATION_DAYS))
-        : 1;
-    // For sandbox arenas show elapsed days; for live arenas show T-minus to endDate
-    const clockDiff = isSandbox ? (Date.now() - arenaStartMs) : (arenaEndMs - Date.now());
-    const absMs = Math.abs(clockDiff);
-    const cd = Math.floor(absMs / 86400000);
-    const ch = Math.floor((absMs % 86400000) / 3600000);
-    const cm = Math.floor((absMs % 3600000) / 60000);
-    const cs = Math.floor((absMs % 60000) / 1000);
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const clockLabel = !arenaStartMs
-        ? '--:--:--:--'
-        : isSandbox
-            ? `${pad(cd)}:${pad(ch)}:${pad(cm)}:${pad(cs)}` // elapsed
-            : clockDiff <= 0 ? '00:00:00:00' : `${pad(cd)}:${pad(ch)}:${pad(cm)}:${pad(cs)}`; // t-minus
-
     const isMarketFear = (market?.fearGreedIndex ?? 50) < 40;
-
     const isApiCritical = eodhd.pct > 0.9;
 
-    /* ── Loading ── */
     if (loading) return (
         <div className="flex flex-col items-center justify-center h-64 space-y-4">
             <div className="mc-label text-[#8a8f98]">ESTABLISHING TELEMETRY LINK...</div>
@@ -180,679 +232,555 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
         </div>
     );
 
-    // ─── AUDIT TRAIL VIEW ─────────────────────────────────────────────────
-    if (showAuditTrail) {
-        return <AuditTrail userId={userId} onBack={() => setShowAuditTrail(false)} assetClass={assetClass} />;
+    let mainContent;
+
+    if (!userId && !authLoading) {
+        mainContent = (
+            <div className="mc-panel p-10 text-center border-l-4 border-l-[#ff6659] max-w-2xl mx-auto mt-20">
+                <div className="mc-label text-[#ff6659] mb-4 text-lg">ACCESS DENIED // UPLINK LOST</div>
+                <p className="font-mono text-sm text-[#8a8f98] mb-8 leading-relaxed">Please sign in to establish a telemetry link.</p>
+                <div className="flex justify-center"><Server className="text-[#ff6659] opacity-30" size={48} /></div>
+            </div>
+        );
+    } else if (MOTHBALLED_ASSET_CLASSES.includes(assetClass)) {
+        mainContent = (
+            <div className="mc-panel p-10 text-center border-l-4 border-l-[#ff6659] max-w-2xl mx-auto mt-20">
+                <div className="mc-label text-[#ff6659] mb-4 text-lg">ARENA STATUS: MOTHBALLED</div>
+                <p className="font-mono text-sm text-[#8a8f98] mb-8 leading-relaxed">This asset class has been retired from automated monitoring.</p>
+                <div className="flex justify-center"><ShieldAlert className="text-[#ff6659] opacity-50" size={48} /></div>
+            </div>
+        );
+    } else if (showAuditTrail) {
+        mainContent = <AuditTrail userId={userId} onBack={() => setShowAuditTrail(false)} assetClass={assetClass} />;
+    } else if (!arena?.initialized) {
+        mainContent = (
+            <div className="mc-panel p-10 text-center border-l-4 border-l-[#ffb74d] max-w-2xl mx-auto mt-20">
+                <div className="mc-label text-[#ffb74d] mb-4 text-lg">SYSTEM HALT: ARENA PENDING DEPLOYMENT</div>
+                <p className="font-mono text-sm text-[#e2e4e9] mb-8 leading-relaxed">
+                    The Semaphore platform is currently awaiting initialization.
+                </p>
+                <div className="flex flex-col gap-4">
+                    <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                        <button
+                            onClick={() => showConfirm("INIT ARENA", "Trigger AI strategies?", async () => {
+                                setIsInitializing(true);
+                                try {
+                                    const res = await manualInitArena(userId, assetClass);
+                                    if (res.success) await loadData();
+                                } finally { setIsInitializing(false); }
+                            })}
+                            className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-8 py-3 font-mono text-sm font-bold uppercase transition-colors"
+                        >INITIALIZE ARENA</button>
+
+                        {assetClass === 'CRYPTO' && (
+                            <button
+                                onClick={() => showConfirm("MASTER MODE", "Mirror Revolut X?", async () => {
+                                    setIsInitializing(true);
+                                    try {
+                                        await resetUserArena(userId, 'CRYPTO');
+                                        await manualInitArena(userId, 'CRYPTO');
+                                        const res = await enableMasterPortfolioMode(userId);
+                                        if (res.success) await loadData();
+                                    } finally { setIsInitializing(false); }
+                                })}
+                                className="bg-[#0b5394] hover:bg-[#0d61ad] text-white px-8 py-3 font-mono text-sm font-bold uppercase"
+                            >INITIALIZE AS MASTER PORTFOLIO</button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    } else {
+        const poolTickers = arena.pools.flatMap(p => Object.keys(p.holdings).map(t => t.toUpperCase()));
+        const tickerTokens = Array.from(new Set(['BTC', ...poolTickers]));
+
+        mainContent = (
+            <div className="space-y-4">
+                {/* Global Scrolling Ticker */}
+                <div className="mc-panel p-0 overflow-hidden bg-black/40 border-y border-white/5 mb-4">
+                    <div className="flex animate-ticker whitespace-nowrap py-2 hover:pause">
+                        {[...tickerTokens, ...tickerTokens].map((t, i) => (
+                            <div key={`${t}-${i}`} className="inline-flex items-center px-6 border-r border-white/5 space-x-3">
+                                <span className="mc-label text-[9px] text-[#4ba3e3]">{t}</span>
+                                <span className="mc-value text-xs font-bold text-white">
+                                    {currency}{fmtPrice(prices[t.toUpperCase()]?.price || 0)}
+                                </span>
+                                <span className={`text-[8px] font-mono ${(prices[t.toUpperCase()]?.change24h || 0) >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                    {fmtPct(prices[t.toUpperCase()]?.change24h || 0)}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {isSandbox && <SandboxBanner assetClass={assetClass} onCycleComplete={loadData} onActivateCompetition={async () => {}} isActivating={isActivating} showAlert={showAlert} showConfirm={showConfirm} />}
+                
+                {arena?.masterPortfolioMode && (
+                    <div className="mc-panel p-4 border-l-4 border-l-[#4ba3e3] bg-[#1a1c24] flex justify-between items-center">
+                        <div className="flex items-center gap-4">
+                            <Shield className="w-5 h-5 text-[#4ba3e3]" />
+                            <div>
+                                <div className="mc-label text-[#4ba3e3] text-sm font-bold tracking-widest leading-none">MASTER PORTFOLIO MODE ACTIVE</div>
+                                <div className="text-[10px] text-[#8a8f98] font-mono mt-1 uppercase">Mirroring Revolut X // Sell-Only Mode Enabled</div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={async () => {
+                                    setRefreshing(true);
+                                    try {
+                                        const res = await manualRevolutSync(userId);
+                                        if (res.success) {
+                                            showAlert("SYNCHRONIZED", res.message);
+                                            await loadData();
+                                        } else {
+                                            showAlert("SYNC ERROR", res.message);
+                                        }
+                                    } finally { setRefreshing(false); }
+                                }}
+                                disabled={refreshing}
+                                className="px-4 py-2 bg-[#4ba3e3] hover:bg-[#4ba3e3]/90 text-white font-mono text-[10px] font-bold uppercase tracking-wider rounded flex items-center gap-2 transition-all disabled:opacity-50 shadow-[0_0_15px_rgba(75,163,227,0.3)]"
+                            >
+                                <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+                                SYNC NOW
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Status Bar */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
+                    <div className="mc-panel lg:col-span-6 p-5 flex flex-col justify-between">
+                        <div className="flex justify-between items-start mb-4">
+                            <span className="mc-label">NET ASSET VALUE (NAV)</span>
+                            <StatusIndicator status={totalPnl >= 0 ? 'nominal' : 'critical'} />
+                        </div>
+                        <div className="flex items-baseline gap-4">
+                            <span className="mc-value text-4xl font-bold text-white">{currency}{fmtPrice(totalValue)}</span>
+                            <span className={`mc-value text-lg ${totalPnl >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>{fmtPct(totalPnlPct)}</span>
+                        </div>
+                        <div className="mc-divider my-4" />
+                        <div className="flex justify-between items-center text-xs">
+                            <span className="mc-label">TOTAL CAPITAL</span>
+                            <span className="mc-value text-[#8a8f98] font-mono">{currency}{effectiveBasis.toFixed(2)}</span>
+                        </div>
+                    </div>
+
+                    <div className="lg:col-span-6 grid grid-cols-2 gap-4">
+                        <div className="mc-panel p-4 flex flex-col justify-between">
+                            <div className="mc-label text-[10px] mb-2">{assetClass === 'CRYPTO' ? 'BTC ORACLE' : 'TOP PERFORMER'}</div>
+                            <div className="mc-value text-xl text-white flex items-center gap-2">
+                                <LivePrice value={prices['BTC']?.price || 0} currency="$" />
+                                <div className="live-indicator">
+                                    <div className="live-indicator-dot" />
+                                    <span>LIVE</span>
+                                </div>
+                            </div>
+                            <TelemetryBar pct={75} />
+                        </div>
+                        <div className="mc-panel p-4 flex flex-col justify-between">
+                            <div className="mc-label text-[10px] mb-2">TELEMETRY LINK</div>
+                            <div className="mc-value text-xl text-white">{(eodhd.pct * 100).toFixed(1)}%</div>
+                            <TelemetryBar pct={eodhd.pct * 100} colorClass={isApiCritical ? 'bg-red-500' : 'bg-[#0b5394]'} />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Performance Chart */}
+                {performanceHistory && (
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+                        <PerformanceChart history={performanceHistory} />
+                    </div>
+                )}
+
+                {/* Portfolio Section */}
+                <div className="mc-panel p-5 border-l-4 border-l-[#4caf50]">
+                    <div className="flex justify-between items-center mb-6">
+                        <div className="flex items-center gap-3">
+                            <span className="mc-label text-[#4caf50]">PORTFOLIO ALLOCATION</span>
+                            <button onClick={() => setShowManualTrade(true)} className="px-2 py-1 border border-[#4ba3e3]/40 text-[#4ba3e3] text-[9px] font-black uppercase hover:bg-[#4ba3e3]/10 transition-all">+ MANUAL ACQUISITION</button>
+                        </div>
+                        <div className="flex gap-4">
+                            <div className="text-right">
+                                <div className="mc-label text-[9px] text-[#8a8f98]">ASSETS</div>
+                                <div className="mc-value text-white font-mono">{currency}{totalHoldingValue.toFixed(2)}</div>
+                            </div>
+                            <div className="text-right">
+                                <div className="mc-label text-[9px] text-[#8a8f98]">CASH</div>
+                                <div className="mc-value text-[#ffb74d] font-mono">{currency}{totalCash.toFixed(2)}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="h-2 bg-[#1a1c24] flex rounded-full overflow-hidden">
+                        <div className="h-full bg-[#4caf50] transition-all duration-1000" style={{ width: `${origTokenPct}%` }} />
+                        <div className="h-full bg-[#ffb74d] transition-all duration-1000" style={{ width: `${freeCashPct}%` }} />
+                    </div>
+                </div>
+
+                {/* Integrity Alerts */}
+                <IntegrityAlerts userId={userId} assetClass={assetClass} showAlert={showAlert} showConfirm={showConfirm} />
+
+                {/* Strategy Deployment Grid */}
+                <div className="mc-label text-[10px] tracking-[0.2em] opacity-40 py-4 flex items-center gap-4">
+                    <span>STRATEGY DEPLOYMENT TELEMETRY</span>
+                    <div className="h-px bg-white/5 flex-1"></div>
+                </div>
+
+                <div className={`grid grid-cols-1 ${arena.masterPortfolioMode ? '' : 'md:grid-cols-2'} gap-6`}>
+                    {arena.pools.filter(p => p.status === 'ACTIVE').map(pool => {
+                        const pv = poolValues.find(v => v.poolId === pool.poolId);
+                        const isLeader = poolValues.indexOf(pv!) === leaderIdx;
+                        const pnl = pv?.pnl ?? 0;
+                        const pnlPct = pv?.pnlPct ?? 0;
+                        const isProfitable = pnl >= 0;
+
+                        return (
+                            <div key={pool.poolId} className={`mc-panel overflow-hidden border-t-2 relative group ${isLeader ? 'border-t-[#4ba3e3]' : 'border-t-[#272a35]'}`}>
+                                {/* Gradient background hint */}
+                                <div className="absolute inset-0 bg-gradient-to-br from-[#4ba3e3]/5 to-transparent pointer-events-none" />
+                                
+                                <div className="mc-panel-header px-6 py-4 bg-white/[0.02] flex justify-between items-center border-b border-white/5">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`p-2 rounded bg-white/5 ${isLeader ? 'text-[#4ba3e3]' : 'text-[#8a8f98]'}`}>
+                                            <Shield size={16} />
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="mc-label text-xs tracking-widest">{pool.name}</span>
+                                            <span className="text-[9px] text-[#555] font-mono uppercase tracking-[0.2em]">Synchronized // Revolut X uplink</span>
+                                        </div>
+                                    </div>
+                                    <div className="text-right flex flex-col">
+                                        <span className={`font-mono text-lg font-bold ${isProfitable ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>{fmtPct(pnlPct)}</span>
+                                        <span className="text-[8px] text-[#8a8f98] uppercase tracking-widest">Master Net Performance</span>
+                                    </div>
+                                </div>
+
+                                <div className="p-8 grid grid-cols-1 lg:grid-cols-12 gap-12">
+                                    {/* Left: Financial Overview */}
+                                    <div className="lg:col-span-4 flex flex-col justify-start space-y-6">
+                                        <div className="space-y-1">
+                                            <span className="mc-label text-[10px] text-[#8a8f98] tracking-[0.3em]">TOTAL EQUITY</span>
+                                            <div className="text-5xl font-black text-white tracking-tight">{currency}{fmtPrice(pv?.total || 0)}</div>
+                                            <div className={`font-mono text-sm flex items-center gap-2 ${isProfitable ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                                {isProfitable ? <Activity size={14} /> : <TrendingDown size={14} />} 
+                                                {isProfitable?'+':'-'}{currency}{Math.abs(pnl).toFixed(2)} TOTAL PNL
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="pt-6 grid grid-cols-2 gap-4 border-t border-white/5">
+                                            <div>
+                                                <div className="text-[9px] text-[#555] font-bold uppercase tracking-widest mb-1">Cost Basis</div>
+                                                <div className="text-sm font-mono text-white/60">{currency}{fmtPrice(pv?.costBasis || 0)}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[9px] text-[#555] font-bold uppercase tracking-widest mb-1">Exposure</div>
+                                                <div className="text-sm font-mono text-white/60">{((pv?.total || 0) / (totalValue || 1) * 100).toFixed(1)}%</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Right: Holding Breakdown */}
+                                    <div className="lg:col-span-8 bg-black/20 rounded-xl border border-white/5 overflow-hidden">
+                                        <div className="bg-white/5 px-4 py-2 flex justify-between text-[9px] font-black tracking-widest text-[#555] uppercase border-b border-white/5">
+                                            <span>Active Positions</span>
+                                            <span>Valuation @ Live Price</span>
+                                        </div>
+                                        <div className="w-full">
+                                            {Object.entries(pool.holdings).length === 0 ? (
+                                                <div className="p-8 text-center text-[#555] font-mono text-xs uppercase italic">No active positions mirrored from Revolut X</div>
+                                            ) : (
+                                                Object.entries(pool.holdings).sort((a,b) => {
+                                                    const liveA = prices[a[0].toUpperCase()]?.price || a[1].averagePrice;
+                                                    const liveB = prices[b[0].toUpperCase()]?.price || b[1].averagePrice;
+                                                    return (b[1].amount * liveB) - (a[1].amount * liveA);
+                                                }).map(([ticker, h]) => {
+                                                    const liveP = prices[ticker.toUpperCase()]?.price || h.averagePrice;
+                                                    const curV = h.amount * liveP;
+                                                    const posPnlPct = h.averagePrice > 0 ? ((liveP - h.averagePrice) / h.averagePrice) * 100 : 0;
+                                                    
+                                                    return (
+                                                        <div key={ticker} className="flex justify-between items-center p-4 border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors last:border-0 group/row">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded bg-white/5 flex items-center justify-center font-mono text-xs font-bold text-[#4ba3e3] border border-white/5 group-hover/row:border-[#4ba3e3]/30 transition-all">
+                                                                    {ticker[0]}
+                                                                </div>
+                                                                <div className="flex flex-col">
+                                                                    <div className="text-sm font-bold text-white flex items-center gap-2">
+                                                                        {ticker}
+                                                                        <span className={`text-[9px] font-mono ${posPnlPct >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
+                                                                            {posPnlPct >= 0 ? '▲' : '▼'} {Math.abs(posPnlPct).toFixed(1)}%
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="text-[10px] text-[#8a8f98] font-mono">
+                                                                        {h.amount.toFixed(4)} <span className="text-[#555]">@</span> {currency}{fmtPrice(h.averagePrice)}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <div className="text-sm font-bold text-white font-mono">
+                                                                    <LivePrice value={curV} currency={currency} />
+                                                                </div>
+                                                                <div className="text-[10px] flex items-center justify-end gap-1.5">
+                                                                    <span className="text-[#555] font-mono">{currency}{fmtPrice(liveP)}</span>
+                                                                    <div className="live-indicator">
+                                                                        <div className="live-indicator-dot" />
+                                                                        <span>LIVE</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* Manual Madness Controls Injection */}
+                                <div className="border-t border-white/[0.05] bg-[#0d0e12] p-8">
+                                    <ManualMadnessControls 
+                                        userId={userId} 
+                                        pool={pool} 
+                                        prices={prices} 
+                                        onUpdate={loadData} 
+                                        showAlert={showAlert} 
+                                        showConfirm={showConfirm} 
+                                    />
+                                </div>
+                            </div>
+
+                        );
+                    })}
+                </div>
+
+                {/* Execution Ledger */}
+                <div className="mc-panel overflow-hidden mt-8">
+                    <div className="mc-panel-header">EXECUTION LEDGER FEED</div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left font-mono text-[10px]">
+                            <thead className="bg-white/5">
+                                <tr>
+                                    <th className="p-3 text-[#8a8f98]">DATE</th>
+                                    <th className="p-3 text-[#8a8f98]">OP</th>
+                                    <th className="p-3 text-[#8a8f98]">TICKER</th>
+                                    <th className="p-3 text-[#8a8f98]">UNITS</th>
+                                    <th className="p-3 text-[#8a8f98] text-right">VALUE</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {trades.slice(ledgerPage * 10, (ledgerPage + 1) * 10).map((t, idx) => (
+                                    <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                        <td className="p-3 text-[#555]">{new Date(t.date).toLocaleDateString()}</td>
+                                        <td className={`p-3 font-bold ${t.type==='BUY'?'text-[#4caf50]':'text-[#ff6659]'}`}>{t.type}</td>
+                                        <td className="p-3 text-white">{t.ticker}</td>
+                                        <td className="p-3 text-[#8a8f98]">{t.amount.toFixed(4)}</td>
+                                        <td className="p-3 text-right text-white font-bold">{currency}{t.total.toFixed(2)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        );
     }
 
-    if (!arena?.initialized) return (
-        <div className="mc-panel p-10 text-center border-l-4 border-l-[#ffb74d] max-w-2xl mx-auto mt-20">
-            <div className="mc-label text-[#ffb74d] mb-4 text-lg">SYSTEM HALT: ARENA PENDING DEPLOYMENT</div>
-            <p className="font-mono text-sm text-[#e2e4e9] mb-8 leading-relaxed">
-                The Semaphore Arena is currently awaiting initialization. Proceeding will trigger AI to generate 4 distinct trading strategies, allocate the $600 baseline capital, and immediately deploy the funds into real-market execution.
-            </p>
-            <button
-                onClick={async () => {
-                    setIsInitializing(true);
-                    try {
-                        const res = await manualInitArena(userId, assetClass);
-                        if (res.success) {
-                            await loadData();
-                        } else {
-                            alert(res.message);
-                        }
-                    } catch (e: any) {
-                        alert(e.message);
-                    } finally {
-                        setIsInitializing(false);
-                    }
-                }}
-                disabled={isInitializing}
-                className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white px-8 py-3 font-mono text-sm font-bold tracking-widest uppercase transition-colors disabled:opacity-50"
-            >
-                {isInitializing ? "DEPLOYING AI STRATEGIES..." : "INITIALIZE ARENA // AUTO-DEPLOY"}
-            </button>
-            {isInitializing && (
-                <div className="mt-6 flex justify-center gap-2">
-                    <span className="dot dot-nominal"></span>
-                    <span className="mc-label text-[10px] text-[#4caf50]">UPLINKING TO GEMINI ARCHITECT...</span>
+    return (
+        <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+            {/* Context Header */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-6">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[10px] font-black tracking-[0.2em] uppercase text-[#555]">
+                    <span className="flex items-center gap-1.5"><StatusIndicator status="nominal" /> <span className="text-[#8a8f98]">SYSTEM NOMINAL</span></span>
+                    <span className="flex items-center gap-1.5 text-[#4ba3e3]"><Activity size={10} /> UPLINK 010.59</span>
+                    <span className="bg-white/5 px-2 py-0.5 rounded text-[#8a8f98]">{assetClass} ARENA // {arena?.masterPortfolioMode ? 'MASTER MODE' : 'AI-DCA STRATEGIC'}</span>
+                </div>
+                
+                {/* Secondary Actions */}
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setShowAuditTrail(true)}
+                        className="bg-white/5 hover:bg-white/10 text-[#8a8f98] px-3 py-1.5 rounded font-mono text-[9px] font-bold uppercase transition-all flex items-center gap-2 border border-white/5"
+                    >
+                        <Shield size={10} /> AUDIT TRAIL
+                    </button>
+                    <button 
+                        onClick={async () => { setRefreshing(true); await loadData(); setRefreshing(false); }}
+                        className="bg-white/5 hover:bg-white/10 text-[#8a8f98] px-3 py-1.5 rounded font-mono text-[9px] font-bold uppercase transition-all flex items-center gap-2 border border-white/5 shadow-[0_0_10px_rgba(255,255,255,0.02)]"
+                    >
+                        <RefreshCw size={10} className={refreshing ? 'animate-spin' : ''} /> REFRESH
+                    </button>
+                    <button 
+                        onClick={() => showConfirm("RESET START", "Reset mission baseline to now? (Clears graph history)", async () => {
+                            setRefreshing(true);
+                            try {
+                                const res = await resetMissionClock(userId, assetClass);
+                                if (res.success) {
+                                    showAlert("MISSION RESET", res.message);
+                                    await loadData();
+                                }
+                            } finally { setRefreshing(false); }
+                        })}
+                        className="bg-white/5 hover:bg-white/10 text-orange-400/60 px-3 py-1.5 rounded font-mono text-[9px] font-bold uppercase transition-all flex items-center gap-2 border border-orange-500/10"
+                    >
+                        <RefreshCw size={10} /> RESET START
+                    </button>
+                    {assetClass === 'CRYPTO' && (
+                        <button
+                            onClick={() => setShowManualTrade(true)}
+                            className="bg-white/5 hover:bg-[#4ba3e3]/10 text-[#8a8f98] hover:text-[#4ba3e3] px-3 py-1.5 rounded font-mono text-[9px] font-bold uppercase transition-all flex items-center gap-2 border border-white/5"
+                        >
+                            <Zap size={10} /> MANUAL ACQUISITION
+                        </button>
+                    )}
+                </div>
+            </div>
+
+                {mainContent}
+
+            {/* Deep Dive Intelligence Report */}
+            {assetClass === 'CRYPTO' && (
+                <div className="mc-panel overflow-hidden mt-8 mb-8">
+                    <div className="mc-panel-header flex justify-between items-center">
+                        <div className="flex items-center gap-2 text-[#4ba3e3]">
+                            <Activity size={14} /> DEEP DIVE INTELLIGENCE
+                        </div>
+                        <button
+                            onClick={handleGenerateDeepDive}
+                            disabled={generatingDeepDive}
+                            className="bg-[#0b5394] hover:bg-[#0d61ad] text-white px-3 py-1 text-[10px] font-bold tracking-widest uppercase transition-colors disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {generatingDeepDive ? <RefreshCw size={12} className="animate-spin" /> : "GENERATE REPORT"}
+                        </button>
+                    </div>
+                    <div className="p-8 space-y-8 bg-[#0d0e12]">
+                        {deepDiveReport ? (
+                            <>
+                                <div className="text-[10px] text-[#8a8f98] font-mono tracking-widest flex justify-between">
+                                    <span>LAST GENERATED: {new Date(deepDiveReport.generatedAt).toLocaleString()}</span>
+                                    <span>Monitoring positions valued &gt; $50</span>
+                                </div>
+                                
+                                {/* News Section */}
+                                <div>
+                                    <h3 className="text-[#ffb74d] text-xs font-bold font-mono tracking-widest mb-3 uppercase flex items-center gap-2">
+                                        <AlertCircle size={14} /> Market Intelligence (News)
+                                    </h3>
+                                    <div className="text-[11px] font-mono text-[#e2e4e9] leading-relaxed whitespace-pre-wrap bg-black/40 p-5 border border-[#ffb74d]/20 rounded-lg">
+                                        {deepDiveReport.marketplaceNews}
+                                    </div>
+                                </div>
+
+                                {/* BTC Reference */}
+                                {deepDiveReport.btcReference && (
+                                    <div className="border border-[#f7931a]/50 bg-[#f7931a]/5 rounded-lg p-5">
+                                        <h3 className="text-[#f7931a] text-sm font-bold font-mono mb-3 flex items-center justify-between">
+                                            <span>BTC REFERENCE POINT</span>
+                                            <span className="bg-[#f7931a] text-black px-2 py-0.5 rounded text-xs">GRADE {deepDiveReport.btcReference.rating}</span>
+                                        </h3>
+                                        <p className="text-sm text-white/90 leading-relaxed mb-4 font-mono">{deepDiveReport.btcReference.analysis}</p>
+                                        <div className="grid grid-cols-3 gap-4 border-t border-[#f7931a]/20 pt-4">
+                                            <div><div className="text-[10px] text-[#f7931a]/70 font-mono mb-1">24H TARGET</div><div className="text-md font-bold font-mono text-white">${deepDiveReport.btcReference.target24h?.toLocaleString() || '-'}</div></div>
+                                            <div><div className="text-[10px] text-[#f7931a]/70 font-mono mb-1">7D TARGET</div><div className="text-md font-bold font-mono text-white">${deepDiveReport.btcReference.target7d?.toLocaleString() || '-'}</div></div>
+                                            <div><div className="text-[10px] text-[#f7931a]/70 font-mono mb-1">30D TARGET</div><div className="text-md font-bold font-mono text-white">${deepDiveReport.btcReference.target30d?.toLocaleString() || '-'}</div></div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Token Deep Dives */}
+                                <div className="space-y-4">
+                                    <h3 className="text-[#4ba3e3] text-xs font-bold font-mono tracking-widest uppercase pb-2 border-b border-white/10 mt-6">
+                                        Active Position Analysis
+                                    </h3>
+                                    {deepDiveReport.tokenDeepDives?.map((t: any, i: number) => (
+                                        <div key={i} className="bg-black/30 border border-white/10 rounded-lg p-5 hover:border-white/20 transition-all">
+                                            <div className="flex justify-between items-center mb-3 border-b border-white/5 pb-2">
+                                                <h4 className="text-white font-bold text-lg tracking-wider flex items-center gap-2">
+                                                    <span className="w-6 h-6 rounded bg-white/10 flex items-center justify-center text-[10px] text-[#4ba3e3]">{t.ticker[0]}</span>
+                                                    {t.ticker}
+                                                </h4>
+                                                <span className={`px-2 py-0.5 rounded text-xs font-black font-mono ${['A','B'].includes(t.rating) ? 'bg-[#4caf50]' : ['C','D'].includes(t.rating) ? 'bg-[#ffb74d]' : 'bg-[#ff6659]'} text-black`}>GRADE {t.rating}</span>
+                                            </div>
+                                            <p className="text-sm text-[#8a8f98] leading-relaxed mb-4 font-mono">{t.analysis}</p>
+                                            <div className="grid grid-cols-3 gap-4 bg-white/5 rounded-lg p-3">
+                                                <div><div className="text-[9px] text-[#555] font-mono mb-1 uppercase tracking-widest">24H Target</div><div className="text-sm font-bold font-mono text-white">${t.target24h?.toLocaleString() || '-'}</div></div>
+                                                <div><div className="text-[9px] text-[#555] font-mono mb-1 uppercase tracking-widest">7D Target</div><div className="text-sm font-bold font-mono text-white">${t.target7d?.toLocaleString() || '-'}</div></div>
+                                                <div><div className="text-[9px] text-[#555] font-mono mb-1 uppercase tracking-widest">30D Target</div><div className="text-sm font-bold font-mono text-white">${t.target30d?.toLocaleString() || '-'}</div></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="text-center py-12 text-[#555] font-mono text-[10px] uppercase tracking-widest flex flex-col items-center justify-center gap-4">
+                                <Activity size={32} className="opacity-20" />
+                                No deep dive intelligence generated yet.<br/>Click "Generate Report" to run the LLM analysis cluster on holdings &gt; $50.
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Global Modals & Overlays */}
+            {showManualTrade && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="mc-panel w-full max-w-md bg-[#1a1c24] border-l-4 border-l-[#4ba3e3]">
+                        <div className="p-6 border-b border-white/5 flex justify-between items-center">
+                            <span className="mc-label text-[#4ba3e3]">MANUAL ACQUISITION</span>
+                            <button onClick={() => setShowManualTrade(false)}><X size={20} className="text-[#555] hover:text-white" /></button>
+                        </div>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            const f = e.currentTarget;
+                            const d = new FormData(f);
+                            const ticker = d.get('ticker') as string;
+                            const amount = parseFloat(d.get('amount') as string);
+                            const price = parseFloat(d.get('price') as string);
+                            const reason = d.get('reason') as string;
+                            setRefreshing(true);
+                            try {
+                                const res = await manualPurchase(userId, assetClass, ticker, amount, price, reason);
+                                if (res.success) { await loadData(); setShowManualTrade(false); }
+                                else { showAlert("Purchase Failed", res.message, "error"); }
+                            } finally { setRefreshing(false); }
+                        }} className="p-6 space-y-4">
+                            <input name="ticker" required placeholder="TICKER (e.g. BTC)" className="w-full bg-black/40 border border-white/5 p-3 font-mono text-sm uppercase outline-none focus:border-[#4ba3e3]" />
+                            <div className="grid grid-cols-2 gap-4">
+                                <input name="amount" type="number" step="any" required placeholder="AMOUNT" className="bg-black/40 border border-white/5 p-3 font-mono text-sm outline-none" />
+                                <input name="price" type="number" step="any" required placeholder="UNIT PRICE" className="bg-black/40 border border-white/5 p-3 font-mono text-sm outline-none" />
+                            </div>
+                            <textarea name="reason" required placeholder="RATIONALE" className="w-full bg-black/40 border border-white/5 p-3 font-mono text-xs h-24 outline-none" />
+                            <button type="submit" disabled={refreshing} className="w-full bg-[#0b5394] hover:bg-[#0d61ad] text-white py-4 font-mono text-sm font-black uppercase transition-all disabled:opacity-50">
+                                {refreshing ? 'AUTHORIZING...' : 'CONFIRM ACQUISITION'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {smartAlert && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-300">
+                    <div className="mc-panel w-full max-w-sm overflow-hidden bg-[#1a1c24] border-t-2 scale-in" style={{ borderColor: smartAlert?.type === 'error' ? '#ff6659' : smartAlert?.type === 'success' ? '#4caf50' : '#4ba3e3' }}>
+                        <div className="p-8 text-center">
+                            <div className="flex justify-center mb-6">
+                                {smartAlert?.type === 'error' ? <ShieldAlert size={48} className="text-[#ff6659]" /> : smartAlert?.type === 'success' ? <Shield size={48} className="text-[#4caf50]" /> : <Activity size={48} className="text-[#4ba3e3]" />}
+                            </div>
+                            <h3 className="mc-label text-lg mb-2 tracking-[0.2em]">{smartAlert?.title}</h3>
+                            <p className="text-sm text-[#8a8f98] font-mono leading-relaxed mb-8">{smartAlert?.message}</p>
+                            
+                            <div className="flex flex-col gap-3">
+                                {smartAlert?.type === 'confirm' ? (
+                                    <>
+                                        <button onClick={smartAlert?.onConfirm} className="mc-button w-full justify-center bg-[#0b5394] hover:bg-[#0d61ad] text-white py-4 font-mono text-sm font-black uppercase transition-all shadow-[0_0_20px_rgba(11,83,148,0.3)]">CONFIRM // AUTHORIZE</button>
+                                        <button onClick={smartAlert?.onCancel} className="mc-button w-full justify-center bg-white/5 hover:bg-white/10 text-[#555] py-2 font-mono text-[9px] font-black uppercase transition-all">ABORT // CANCEL</button>
+                                    </>
+                                ) : (
+                                    <button onClick={() => setSmartAlert(null)} className="mc-button w-full justify-center bg-white/5 hover:bg-white/10 text-white py-4 font-mono text-sm font-black uppercase transition-all">CONTINUE // DISMISS</button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
-    );
-
-    return (
-        <div className="space-y-4">
-
-            {/* Sandbox banner — shown for FTSE, NYSE, Commodities */}
-            {isSandbox && (
-                <SandboxBanner
-                    assetClass={assetClass}
-                    onCycleComplete={loadData}
-                    onActivateCompetition={async () => {
-                        try {
-                            const { activateSandboxCompetition } = await import('@/app/actions');
-                            await activateSandboxCompetition(userId, assetClass);
-                            await loadData();
-                        } catch (e: any) { alert(e.message); }
-                    }}
-                />
-            )}
-
-            {/* ═ GLOBAL MISSION STATUS ═ */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
-
-                {/* Main PNL Block */}
-                <div className="mc-panel md:col-span-1 lg:col-span-4 p-5 flex flex-col justify-between">
-                    <div className="flex justify-between items-start mb-4">
-                        <span className="mc-label">Net Asset Value (NAV)</span>
-                        <StatusIndicator status={totalPnl >= 0 ? 'nominal' : 'critical'} />
-                    </div>
-                    <div className="flex items-baseline gap-4">
-                        <span className="mc-value text-4xl font-bold tracking-tight text-white">{currency}{fmtPrice(totalValue)}</span>
-                        <span className={`mc-value text-lg ${totalPnl >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
-                            {fmtPct(totalPnlPct)}
-                        </span>
-                    </div>
-                    <div className="mc-divider my-4" />
-                    <div className="flex justify-between items-center">
-                        <span className="mc-label">TOTAL INVESTED</span>
-                        <span className="mc-value text-sm text-[#8a8f98]">
-                            {currency}{effectiveBasis.toFixed(2)}
-                            {hasDca && (
-                                <span className="ml-1.5 text-[9px] font-bold text-[#4ba3e3] uppercase tracking-widest">
-                                    +{currency}{totalDcaContributions.toFixed(0)} DCA
-                                </span>
-                            )}
-                        </span>
-                    </div>
-                </div>
-
-                {/* Telemetry Grid — Panel 1 & 2 are asset-class aware */}
-                <div className="grid grid-cols-2 gap-4 md:col-span-1 lg:col-span-5">
-
-                    {/* Panel 1: BTC Oracle (crypto) | Top Holding (others) */}
-                    {assetClass === 'CRYPTO' ? (
-                        <div className="mc-panel p-4 flex flex-col justify-between">
-                            <div className="mc-label mb-2 flex justify-between">
-                                BTC ORACLE <StatusIndicator status={prices['BTC']?.change24h >= 0 ? 'nominal' : 'warning'} />
-                            </div>
-                            <div className="mc-value text-2xl text-white mb-1">${fmtPrice(prices['BTC']?.price ?? 0)}</div>
-                            <div className={`mc-value text-xs ${prices['BTC']?.change24h >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
-                                {fmtPct(prices['BTC']?.change24h ?? 0)} 24H
-                            </div>
-                        </div>
-                    ) : (() => {
-                        // Find best-performing holding across all pools
-                        let bestTicker = '', bestPct = -Infinity;
-                        arena?.pools.forEach(p => {
-                            Object.entries(p.holdings || {}).forEach(([t, h]) => {
-                                const liveP = prices[t.toUpperCase()]?.price;
-                                if (!liveP || !h.averagePrice) return;
-                                const pct = ((liveP - h.averagePrice) / h.averagePrice) * 100;
-                                if (pct > bestPct) { bestPct = pct; bestTicker = t; }
-                            });
-                        });
-                        const bpData = bestTicker ? prices[bestTicker.toUpperCase()] : null;
-                        return (
-                            <div className="mc-panel p-4 flex flex-col justify-between">
-                                <div className="mc-label mb-2 flex justify-between">
-                                    TOP HOLDING <StatusIndicator status={bestPct >= 0 ? 'nominal' : 'warning'} />
-                                </div>
-                                <div className="mc-value text-2xl text-white mb-1 truncate">
-                                    {bestTicker || '—'}
-                                </div>
-                                <div className={`mc-value text-xs ${bestPct >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
-                                    {bestTicker ? `${fmtPct(bestPct)} vs cost` : 'No positions'}
-                                </div>
-                            </div>
-                        );
-                    })()}
-
-                    {/* Panel 2: Sentiment/Fear-Greed (crypto) | Win Rate (others) */}
-                    {assetClass === 'CRYPTO' ? (
-                        <div className="mc-panel p-4 flex flex-col justify-between">
-                            <div className="mc-label mb-2 flex justify-between">
-                                SENTIMENT <StatusIndicator status={isMarketFear ? 'warning' : 'nominal'} />
-                            </div>
-                            <div className="mc-value text-2xl text-white mb-1">{market?.fearGreedIndex ?? '—'}</div>
-                            <div className="mc-value text-xs text-[#d32f2f] uppercase">
-                                {market?.fearGreedStatus ?? 'UNKNOWN'}
-                            </div>
-                        </div>
-                    ) : (() => {
-                        const sells = trades.filter(t => t.type === 'SELL');
-                        const wins = sells.filter(t => (t.pnlPct ?? 0) > 0).length;
-                        const winRate = sells.length > 0 ? (wins / sells.length) * 100 : null;
-                        const status = winRate === null ? 'nominal' : winRate >= 50 ? 'nominal' : 'warning';
-                        return (
-                            <div className="mc-panel p-4 flex flex-col justify-between">
-                                <div className="mc-label mb-2 flex justify-between">
-                                    WIN RATE <StatusIndicator status={status} />
-                                </div>
-                                <div className="mc-value text-2xl text-white mb-1">
-                                    {winRate !== null ? `${winRate.toFixed(0)}%` : '—'}
-                                </div>
-                                <div className="mc-value text-xs text-[#8a8f98]">
-                                    {wins}W / {sells.length - wins}L of {sells.length} closed
-                                </div>
-                            </div>
-                        );
-                    })()}
-
-                    <div className="mc-panel p-4 flex flex-col justify-between">
-                        <div className="mc-label mb-2 flex justify-between">
-                            API QUOTA <StatusIndicator status={isApiCritical ? 'critical' : 'nominal'} />
-                        </div>
-                        <div className="mc-value text-2xl text-white mb-1">{((eodhd.pct || 0) * 100).toFixed(1)}%</div>
-                        <TelemetryBar pct={(eodhd.pct || 0) * 100} colorClass={isApiCritical ? 'bg-red-500' : 'bg-[#0b5394]'} />
-                        <div className="mc-value text-[10px] text-[#8a8f98] mt-2 text-right">
-                            {eodhd.used.toLocaleString()} / {eodhd.limit.toLocaleString()} REQ
-                        </div>
-                    </div>
-
-                    <div className="mc-panel p-4 flex flex-col justify-between">
-                        <div className="mc-label mb-2 flex justify-between">
-                            EXECUTIONS <StatusIndicator status="nominal" />
-                        </div>
-                        <div className="mc-value text-2xl text-white mb-1">{trades.length}</div>
-                        <div className="flex items-center gap-2 mt-auto">
-                            <span className="px-1.5 py-0.5 bg-[#1b5e20] text-[#a5d6a7] font-mono text-[9px] font-bold">B: {trades.filter(t => t.type === 'BUY').length}</span>
-                            <span className="px-1.5 py-0.5 bg-[#b71c1c] text-[#ef9a9a] font-mono text-[9px] font-bold">S: {trades.filter(t => t.type === 'SELL').length}</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Mission Clock */}
-                <div className="mc-panel md:col-span-2 lg:col-span-3 p-4 flex flex-col justify-between border-l-4 border-l-[#0b5394]">
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="mc-label flex flex-col gap-0.5 leading-none">
-                            <span>MISSION CLOCK</span>
-                            <span className="text-[9px] opacity-60 font-mono">{isSandbox ? '(ELAPSED)' : '(T-MINUS)'}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setShowAuditTrail(true)}
-                                className="flex items-center gap-1.5 px-2.5 py-1 border border-[#272a35] hover:border-[#ffb74d] text-[#8a8f98] hover:text-[#ffb74d] transition-colors"
-                                title="View AI Audit Trail"
-                            >
-                                <Shield size={12} />
-                                <span className="font-mono text-[9px] font-bold tracking-widest hidden sm:inline">AUDIT</span>
-                            </button>
-                            {/* Manual cycle trigger — visible for all non-crypto arenas */}
-                            {isNonCryptoClass && (
-                                <button
-                                    onClick={async () => {
-                                        if (!userId || refreshing) return;
-                                        setRefreshing(true);
-                                        try {
-                                            await runSandboxArenaCycle(userId, assetClass);
-                                            await loadData();
-                                        } catch (e: any) {
-                                            console.error('[RunCycle]', e.message);
-                                        } finally {
-                                            setRefreshing(false);
-                                        }
-                                    }}
-                                    disabled={refreshing}
-                                    title="Manually run one AI trading cycle now (bypasses cron schedule)"
-                                    className={`px-2 py-1 border font-mono text-[9px] font-bold tracking-widest transition-colors ${refreshing
-                                        ? 'border-[#272a35] text-[#4ba3e3] opacity-60'
-                                        : 'border-[#0b5394] text-[#4ba3e3] hover:border-[#4ba3e3] hover:bg-[#0b5394]/20'
-                                        }`}
-                                >
-                                    {refreshing ? '⏳' : '▶ RUN'}
-                                </button>
-                            )}
-                            <button
-                                onClick={() => { setRefreshing(true); loadData().then(() => setRefreshing(false)); }}
-                                disabled={refreshing}
-                                className={`p-1.5 hover:bg-[#272a35] rounded ${refreshing ? 'animate-spin text-[#4ba3e3]' : 'text-[#8a8f98]'}`}
-                            >
-                                <RefreshCw size={14} />
-                            </button>
-                        </div>
-                    </div>
-                    <div className="mc-value text-3xl font-bold tracking-wider text-white bg-[#0a0a0c] px-3 py-2 border border-[#272a35] text-center shadow-inner">
-                        {clockLabel}
-                    </div>
-                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-[#272a35]">
-                        <span className="mc-label">{isSandbox ? 'ELAPSED' : 'CYCLE PHASE'}</span>
-                        {isSandbox
-                            ? <span className="mc-value text-sm text-[#f59e0b] font-bold tracking-widest">SANDBOX</span>
-                            : <span className="mc-value text-sm text-[#4ba3e3]">DAY {arenaDay} / {ARENA_DURATION_DAYS}</span>
-                        }
-                    </div>
-                </div>
-
-            </div>
-
-            {/* ═ DCA STATUS STRIP ═ — only shown after first deposit */}
-            {hasDca && (
-                <div className="mc-panel border-l-4 border-l-[#4ba3e3] p-4">
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-                        <div className="flex items-center gap-2">
-                            <span className="text-[#4ba3e3] text-lg">💰</span>
-                            <span className="mc-label text-[#4ba3e3] tracking-widest">DCA PROGRAMME</span>
-                        </div>
-                        <div className="flex flex-wrap gap-x-6 gap-y-2 ml-auto">
-                            <div className="text-center">
-                                <div className="mc-label text-[9px] text-[#8a8f98]">DEPOSITED</div>
-                                <div className="mc-value text-base text-white font-bold">{currency}{totalDcaContributions.toFixed(2)}</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="mc-label text-[9px] text-[#8a8f98]">DEPLOYED</div>
-                                <div className="mc-value text-base text-[#4caf50] font-bold">{currency}{totalDcaDeployed.toFixed(2)}</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="mc-label text-[9px] text-[#8a8f98]">IN RESERVE</div>
-                                <div className="mc-value text-base text-[#ffb74d] font-bold">{currency}{totalDcaReserve.toFixed(2)}</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="mc-label text-[9px] text-[#8a8f98]">DEPLOY TRIGGER</div>
-                                <div className="mc-value text-[11px] text-[#8a8f98]">Score ≥ 85</div>
-                            </div>
-                        </div>
-                    </div>
-                    {/* Per-pool reserve bars */}
-                    {totalDcaReserve > 0 && (
-                        <div className="mt-4 pt-4 border-t border-[#272a35] grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            {arena?.pools.map(p => {
-                                const reserve = p.dcaReserve ?? 0;
-                                const contrib = p.dcaContributions ?? 0;
-                                if (contrib === 0) return null;
-                                const pct = contrib > 0 ? (reserve / contrib) * 100 : 0;
-                                return (
-                                    <div key={p.poolId}>
-                                        <div className="flex justify-between mb-1">
-                                            <span className="mc-label text-[9px]">{p.emoji} {p.name.toUpperCase()}</span>
-                                            <span className="mc-value text-[9px] text-[#ffb74d]">{currency}{reserve.toFixed(2)}</span>
-                                        </div>
-                                        <TelemetryBar pct={pct} colorClass="bg-[#4ba3e3]" />
-                                        <div className="text-[8px] text-[#555] mt-0.5 text-right">{pct.toFixed(0)}% undeployed</div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* ═ STRATEGY MODULES ═ */}
-            <div className="mc-label flex items-center gap-3 pt-4">
-                <span>STRATEGY DEPLOYMENT TELEMETRY</span>
-                <div className="h-px bg-[#272a35] flex-1"></div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {poolValues.map((pool, i) => {
-                    const isLeader = i === leaderIdx;
-                    const isActive = activePool === pool.poolId;
-                    const badgeColor = `pool-badge-${pool.idx}`;
-                    const isProfitable = pool.pnlPct >= 0;
-
-                    return (
-                        <div key={pool.poolId} className={`mc-panel ${isLeader ? 'border-[#4ba3e3] shadow-[0_0_15px_rgba(75,163,227,0.1)]' : ''}`}>
-                            {/* Header */}
-                            <div className="mc-panel-header">
-                                <div className="flex items-center gap-2">
-                                    <span className={`px-2 py-0.5 font-bold ${badgeColor}`}>SQ-{pool.idx + 1}</span>
-                                    <span className="text-white">{pool.name.toUpperCase()}</span>
-                                    <span className="text-[#8a8f98]">{pool.emoji}</span>
-                                </div>
-                                {isLeader && <span className="text-black bg-[#ffb74d] px-2 font-bold uppercase tracking-widest">LEADER</span>}
-                                {pool.status === 'PAUSED' && <span className="text-white bg-[#d32f2f] px-2 font-bold uppercase tracking-widest animate-pulse">HALTED</span>}
-                            </div>
-
-                            {/* Core Stats Row */}
-                            <div
-                                className="p-5 cursor-pointer hover:bg-[#161b22] transition-colors"
-                                onClick={() => setActivePool(isActive ? null : pool.poolId)}
-                            >
-                                <div className="flex justify-between items-end mb-4">
-                                    <div>
-                                        <div className="mc-label mb-1">ASSET VALUE</div>
-                                        <div className="mc-value text-2xl font-bold text-white">${fmtPrice(pool.total)}</div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="mc-label mb-1">DELTA</div>
-                                        <div className={`mc-value text-lg font-bold ${isProfitable ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
-                                            {fmtPct(pool.pnlPct)}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Progress bar representing budget vs value */}
-                                <div className="mb-5">
-                                    <div className="flex justify-between mb-1">
-                                        <span className="mc-value text-[10px] text-[#8a8f98]">COST: ${(pool as any).costBasis?.toFixed(2) ?? pool.budget}</span>
-                                        <span className="mc-value text-[10px] text-[#8a8f98]">LIQUID: ${pool.cashBalance.toFixed(2)}</span>
-                                    </div>
-                                    <TelemetryBar pct={(pool.total / ((pool as any).costBasis || pool.budget)) * 100} colorClass={isProfitable ? 'bg-[#2e7d32]' : 'bg-[#d32f2f]'} />
-                                    {(pool.dcaReserve ?? 0) > 0 && (
-                                        <div className="flex justify-between mt-1.5">
-                                            <span className="mc-label text-[9px] text-[#4ba3e3]">DCA RESERVE AWAITING DEPLOYMENT</span>
-                                            <span className="mc-value text-[9px] text-[#ffb74d] font-bold">${(pool.dcaReserve ?? 0).toFixed(2)}</span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Asset Table */}
-                                <div className="border border-[#272a35] bg-[#0a0a0c]">
-                                    {/* Table Header */}
-                                    <div className="grid grid-cols-4 px-3 py-2 border-b border-[#272a35] mc-label text-[9px]">
-                                        <div className="col-span-1">ASSET</div>
-                                        <div className="col-span-1 text-right">QTY</div>
-                                        <div className="col-span-1 text-right">PRICE</div>
-                                        <div className="col-span-1 text-right">24H </div>
-                                    </div>
-
-                                    {/* Table Rows */}
-                                    {pool.tokens.map((ticker, rowIdx) => {
-                                        const pr = prices[ticker.toUpperCase()];
-                                        const holding = pool.holdings[ticker];
-                                        const chg = pr?.change24h ?? 0;
-                                        return (
-                                            <div key={ticker} className={`grid grid-cols-4 px-3 py-2 items-center mc-value text-xs ${rowIdx !== pool.tokens.length - 1 ? 'border-b border-[#272a35]' : ''}`}>
-                                                <div className="col-span-1 font-bold text-[#e2e4e9]">{ticker}</div>
-                                                <div className="col-span-1 text-right text-[#8a8f98]">
-                                                    {holding ? holding.amount.toFixed(4) : '--'}
-                                                </div>
-                                                <div className="col-span-1 text-right text-white">
-                                                    ${fmtPrice(pr?.price ?? 0)}
-                                                </div>
-                                                <div className={`col-span-1 text-right font-bold ${chg >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
-                                                    {chg >= 0 ? '+' : ''}{chg.toFixed(1)}%
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-
-                                <div className="flex justify-center mt-3">
-                                    <ChevronRight size={16} className={`text-[#8a8f98] transition-transform ${isActive ? 'rotate-90' : ''}`} />
-                                </div>
-                            </div>
-
-                            {/* Expansion Panel */}
-                            {isActive && (
-                                <div className="border-t border-[#272a35] bg-[#0a0a0c] p-5">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div>
-                                            <div className="mc-label mb-2 border-b border-[#272a35] pb-1">OPERATIONAL DIRECTIVE</div>
-                                            <p className="font-sans text-xs text-[#b0b4bc] leading-relaxed">
-                                                {pool.strategy.description}
-                                            </p>
-
-                                            {pool.selectionReasoning && (
-                                                <div className="mt-4">
-                                                    <div className="mc-label mb-2 border-b border-[#272a35] pb-1">AI RATIONALE</div>
-                                                    <div className="font-mono text-[10px] text-[#8a8f98] leading-normal p-3 bg-[#121318] border border-[#272a35] h-32 overflow-y-auto">
-                                                        {pool.selectionReasoning}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div>
-                                            <div className="mc-label mb-2 border-b border-[#272a35] pb-1">EXECUTION PARAMETERS</div>
-                                            <table className="w-full text-left font-mono text-[11px] text-[#e2e4e9]">
-                                                <tbody>
-                                                    <tr className="border-b border-[#272a35]">
-                                                        <td className="py-2 text-[#8a8f98]">Target Entry</td>
-                                                        <td className="py-2 text-right text-[#4caf50] font-bold">&gt; {pool.strategy.buyScoreThreshold}</td>
-                                                    </tr>
-                                                    <tr className="border-b border-[#272a35]">
-                                                        <td className="py-2 text-[#8a8f98]">Target Exit</td>
-                                                        <td className="py-2 text-right text-[#ffb74d] font-bold">&lt; {pool.strategy.exitThreshold}</td>
-                                                    </tr>
-                                                    <tr className="border-b border-[#272a35]">
-                                                        <td className="py-2 text-[#8a8f98]">Critical Stop</td>
-                                                        <td className="py-2 text-right text-[#ff6659] font-bold">{pool.strategy.positionStopLoss}%</td>
-                                                    </tr>
-                                                    <tr className="border-b border-[#272a35]">
-                                                        <td className="py-2 text-[#8a8f98]">Win/Loss Ratio</td>
-                                                        <td className="py-2 text-right text-white">
-                                                            <span className="text-[#4caf50]">{pool.performance.winCount}</span> / <span className="text-[#ff6659]">{pool.performance.lossCount}</span>
-                                                        </td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
-            </div>
-
-            {/* ═ PERFORMANCE GRAPH ═ */}
-            {performanceHistory && (
-                <>
-                    <div className="mc-label flex items-center gap-3 pt-4">
-                        <span>PERFORMANCE GRAPH // NAV &amp; POOL TRAJECTORIES</span>
-                        <div className="h-px bg-[#272a35] flex-1" />
-                    </div>
-                    <PerformanceChart history={performanceHistory} />
-                </>
-            )}
-
-            {/* ═ AI STRATEGY INTELLIGENCE REPORT ═ */}
-            {strategyReport && (
-                <>
-                    <div className="mc-label flex items-center gap-3 pt-4">
-                        <span>AI STRATEGY INTELLIGENCE // {strategyReport.reportType} BRIEFING</span>
-                        <div className="h-px bg-[#272a35] flex-1"></div>
-                    </div>
-
-                    <div className="mc-panel">
-                        <div className="mc-panel-header">
-                            <span>{strategyReport.reportType === 'MORNING' ? '☀️ MORNING' : '🌙 EVENING'} BRIEFING</span>
-                            <div className="flex items-center gap-4">
-                                {/* vs BTC benchmark badge */}
-                                {strategyReport.overallVsBtc !== undefined && (
-                                    <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-full border ${strategyReport.overallVsBtc >= 0 ? 'text-[#4caf50] border-[#4caf50]/30 bg-[#4caf50]/10' : 'text-[#ff6659] border-[#ff6659]/30 bg-[#ff6659]/10'}`}>
-                                        {strategyReport.overallVsBtc >= 0 ? '▲' : '▼'} {strategyReport.overallVsBtc >= 0 ? '+' : ''}{strategyReport.overallVsBtc.toFixed(2)}% vs BTC
-                                    </span>
-                                )}
-                                <span className="text-[#8a8f98]">{new Date(strategyReport.generatedAt).toLocaleString()}</span>
-                            </div>
-                        </div>
-
-                        {/* Pool Grades Grid */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-[#0a0a0c]/50 border-b border-[#272a35]">
-                            {strategyReport.poolAnalyses.map((pa) => {
-                                const gradeColor = pa.grade === 'A' ? '#4caf50' : pa.grade === 'B' ? '#8bc34a' : pa.grade === 'C' ? '#ffb74d' : pa.grade === 'D' ? '#ff9800' : '#ff6659';
-                                const vsBtc = pa.vsBtc ?? 0;
-                                const poolStatusColor = pa.pnlPct >= 0 ? '#4caf50' : vsBtc >= -2 ? '#ffb74d' : '#ff6659';
-                                return (
-                                    <div key={pa.poolId} className="bg-white/5 p-3 rounded-xl border border-white/8">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="text-xs text-[#8a8f98]">{pa.emoji} {pa.poolName}</span>
-                                            <span className="text-xl font-bold font-mono" style={{ color: gradeColor }}>{pa.grade}</span>
-                                        </div>
-                                        <div className="text-xs text-[#e2e4e9] mb-1">{pa.tokens?.join(', ')}</div>
-                                        <div className={`text-sm font-mono font-bold`} style={{ color: poolStatusColor }}>
-                                            ${pa.nav?.toFixed(2)} ({pa.pnlPct >= 0 ? '+' : ''}{pa.pnlPct?.toFixed(2)}%)
-                                        </div>
-                                        {pa.vsBtc !== undefined && (
-                                            <div className={`text-[10px] font-mono mt-0.5 ${vsBtc >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
-                                                {vsBtc >= 0 ? '▲' : '▼'} {vsBtc >= 0 ? '+' : ''}{vsBtc.toFixed(2)}% vs BTC
-                                            </div>
-                                        )}
-                                        <div className="text-[10px] text-[#8a8f98] mt-1">{pa.trades} trades ({pa.wins}W/{pa.losses}L)</div>
-                                        <div className="text-[10px] text-[#adb5c4] mt-2 italic leading-relaxed">{pa.keyInsight}</div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        {/* 24h Predictions Table */}
-                        {strategyReport.predictions && strategyReport.predictions.length > 0 && (
-                            <div className="p-4 border-b border-[#272a35]">
-                                <div className="mc-label text-[10px] mb-3">24H TOKEN FORECAST</div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {strategyReport.predictions.map((pred, i) => {
-                                        const biasIcon = pred.bias === 'BULLISH' ? '🟢' : pred.bias === 'NEUTRAL_TO_BULLISH' ? '🔼' : pred.bias === 'NEUTRAL' ? '⬜' : pred.bias === 'NEUTRAL_TO_BEARISH' ? '🔽' : '🔴';
-                                        const biasColor = (pred.bias === 'BULLISH' || pred.bias === 'NEUTRAL_TO_BULLISH') ? '#4caf50' : pred.bias === 'NEUTRAL' ? '#8a8f98' : '#ff6659';
-                                        return (
-                                            <div key={i} className="bg-white/5 rounded-lg p-3 border border-white/8">
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <span className="font-mono font-bold text-white text-sm">{biasIcon} {pred.token}</span>
-                                                    <span className="font-mono text-[10px]" style={{ color: biasColor }}>{pred.bias.replace(/_/g, ' ')}</span>
-                                                </div>
-                                                <div className="font-mono text-[11px] text-[#e2e4e9] mb-1">
-                                                    ${pred.priceRangeLow?.toFixed(3)} – ${pred.priceRangeHigh?.toFixed(3)}
-                                                    <span className="text-[#8a8f98] ml-2">| Watch: ${pred.keyLevelToWatch?.toFixed(3)}</span>
-                                                </div>
-                                                <div className="text-[10px] text-[#adb5c4] italic leading-relaxed">{pred.rationale}</div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Analysis & Insights */}
-                        <div className="p-4 space-y-4 text-sm font-mono">
-                            <div>
-                                <div className="mc-label text-[10px] mb-2">COMPARATIVE ANALYSIS</div>
-                                <p className="text-[#e2e4e9] leading-relaxed">{strategyReport.comparativeAnalysis}</p>
-                            </div>
-
-                            <div>
-                                <div className="mc-label text-[10px] mb-2">MARKET OUTLOOK</div>
-                                <p className="text-[#adb5c4] leading-relaxed">{strategyReport.marketOutlook}</p>
-                            </div>
-
-                            {strategyReport.campaignProgress && (
-                                <div className="bg-[#0b5394]/10 border border-[#0b5394]/30 rounded-xl p-3">
-                                    <div className="mc-label text-[10px] text-[#4ba3e3] mb-2">📈 CAMPAIGN TRAJECTORY</div>
-                                    <p className="text-[#adb5c4] text-xs leading-relaxed">{strategyReport.campaignProgress}</p>
-                                </div>
-                            )}
-
-                            {strategyReport.recommendations.length > 0 && (
-                                <div>
-                                    <div className="mc-label text-[10px] mb-2">RECOMMENDATIONS</div>
-                                    <ul className="space-y-1">
-                                        {strategyReport.recommendations.map((r, i) => (
-                                            <li key={i} className="text-[#4ba3e3] flex items-start gap-2">
-                                                <span className="text-[#4caf50] mt-0.5">▸</span>
-                                                <span className="text-[#e2e4e9]">{r}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-
-                            {strategyReport.riskAlerts.length > 0 && (
-                                <div className="bg-[#f57c00]/10 border border-[#f57c00]/30 rounded-xl p-3">
-                                    <div className="mc-label text-[10px] text-[#ffb74d] mb-2">⚡ WATCH POINTS</div>
-                                    {strategyReport.riskAlerts.map((r, i) => (
-                                        <p key={i} className="text-[#ffb74d] text-xs">🟡 {r}</p>
-                                    ))}
-                                </div>
-                            )}
-
-                            <div className="text-[10px] text-[#555] text-right border-t border-[#272a35] pt-3">
-                                Leader: {strategyReport.leaderPool} · Laggard: {strategyReport.laggardPool} · NAV: ${strategyReport.overallNAV?.toFixed(2)}
-                            </div>
-                        </div>
-                    </div>
-                </>
-            )}
-
-
-            {/* ═ EXECUTION LEDGER ═ */}
-            <div className="mc-label flex items-center gap-3 pt-4">
-                <span>EXECUTION LEDGER // RAW FEED</span>
-                <div className="h-px bg-[#272a35] flex-1"></div>
-            </div>
-
-            <div className="mc-panel">
-                <div className="mc-panel-header">
-                    <span>OPERATIONAL LOGS</span>
-                    <span>{trades.length} EVENT(S)</span>
-                </div>
-
-                <div className="bg-[#0a0a0c]">
-                    {trades.length === 0 ? (
-                        <div className="p-8 text-center border-y border-[#272a35]">
-                            <span className="mc-value text-[#8a8f98] text-sm">NO EXECUTIONS RECORDED. MONITORING...</span>
-                        </div>
-                    ) : (
-                        <>
-                            <div className="overflow-x-auto w-full">
-                                <table className="w-full text-left font-mono text-xs border-collapse">
-                                    <thead className="bg-[#121318] border-b border-[#272a35]">
-                                        <tr>
-                                            <th className="py-3 px-4 text-[#8a8f98] font-normal">TIMESTAMP</th>
-                                            <th className="py-3 px-4 text-[#8a8f98] font-normal">TYPE</th>
-                                            <th className="py-3 px-4 text-[#8a8f98] font-normal">ASSET</th>
-                                            <th className="py-3 px-4 text-[#8a8f98] font-normal">UNIT</th>
-                                            <th className="py-3 px-4 text-[#8a8f98] font-normal text-right">TOTAL (USD)</th>
-                                            <th className="py-3 px-4 text-[#8a8f98] font-normal text-right">PNL</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {trades.slice(ledgerPage * TRADES_PER_PAGE, (ledgerPage + 1) * TRADES_PER_PAGE).map((t, i) => {
-                                            const isBuy = t.type === 'BUY';
-                                            const dateStr = new Date(t.date || Date.now()).toISOString().replace('T', ' ').substring(0, 19);
-                                            return (
-                                                <tr key={i} className="border-b border-[#272a35] hover:bg-[#121318] transition-colors">
-                                                    <td className="py-3 px-4 text-[#8a8f98]">{dateStr}</td>
-                                                    <td className={`py-3 px-4 font-bold ${isBuy ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>{t.type}</td>
-                                                    <td className="py-3 px-4 text-white">
-                                                        {t.ticker}
-                                                        <span className="text-[#8a8f98] text-[9px] ml-2 block sm:inline">({t.poolName})</span>
-                                                    </td>
-                                                    <td className="py-3 px-4 text-[#e2e4e9]">{t.amount.toFixed(4)} @ ${fmtPrice(t.price)}</td>
-                                                    <td className="py-3 px-4 text-white text-right font-bold">${t.total.toFixed(2)}</td>
-                                                    <td className="py-3 px-4 text-right">
-                                                        {t.pnlPct !== undefined ? (
-                                                            <span className={`font-bold ${t.pnlPct >= 0 ? 'text-[#4caf50]' : 'text-[#ff6659]'}`}>
-                                                                {fmtPct(t.pnlPct)}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-[#8a8f98]">--</span>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            )
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {/* Pagination Controls */}
-                            {trades.length > TRADES_PER_PAGE && (
-                                <div className="flex items-center justify-between px-4 py-3 border-t border-[#272a35] bg-[#121318]">
-                                    <button
-                                        onClick={() => setLedgerPage(p => Math.max(0, p - 1))}
-                                        disabled={ledgerPage === 0}
-                                        className="px-3 py-1.5 font-mono text-xs tracking-wider border border-[#272a35] text-[#8a8f98] hover:text-white hover:border-[#4ba3e3] transition-colors disabled:opacity-30 disabled:hover:text-[#8a8f98] disabled:hover:border-[#272a35]"
-                                    >
-                                        ◄ PREV
-                                    </button>
-                                    <span className="font-mono text-xs text-[#8a8f98]">
-                                        PAGE {ledgerPage + 1} / {Math.ceil(trades.length / TRADES_PER_PAGE)}
-                                    </span>
-                                    <button
-                                        onClick={() => setLedgerPage(p => Math.min(Math.ceil(trades.length / TRADES_PER_PAGE) - 1, p + 1))}
-                                        disabled={ledgerPage >= Math.ceil(trades.length / TRADES_PER_PAGE) - 1}
-                                        className="px-3 py-1.5 font-mono text-xs tracking-wider border border-[#272a35] text-[#8a8f98] hover:text-white hover:border-[#4ba3e3] transition-colors disabled:opacity-30 disabled:hover:text-[#8a8f98] disabled:hover:border-[#272a35]"
-                                    >
-                                        NEXT ►
-                                    </button>
-                                </div>
-                            )}
-                        </>
-                    )}
-                </div>
-            </div>
-
-        </div >
     );
 }

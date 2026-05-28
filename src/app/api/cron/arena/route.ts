@@ -53,7 +53,7 @@ export async function GET(request: Request) {
             }
 
             try {
-                console.log(`[Arena Cron] 🏟️ Processing user ${userId.substring(0, 8)}...`);
+                if (process.env.NODE_ENV !== 'production') console.log(`[Arena Cron] 🏟️ Processing user ${userId.substring(0, 8)}...`);
                 const cycleResult = await runArenaCycle(userId);
 
                 results.push({

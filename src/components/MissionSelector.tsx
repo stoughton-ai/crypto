@@ -26,6 +26,7 @@ const STATUS_CONFIG = {
     SANDBOX: { dot: '#f59e0b', label: 'SANDBOX', shadow: '0 0 8px #f59e0b' },
     IDLE: { dot: '#6b7280', label: 'IDLE', shadow: 'none' },
     COMPLETE: { dot: '#4ba3e3', label: 'COMPLETE', shadow: '0 0 8px #4ba3e3' },
+    MOTHBALLED: { dot: '#ef4444', label: 'MOTHBALLED', shadow: 'none' },
 };
 
 export default function MissionSelector({ cards }: Props) {

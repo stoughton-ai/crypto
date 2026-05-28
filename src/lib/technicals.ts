@@ -6,8 +6,8 @@
  * with ground-truth computed values.
  *
  * Indicators computed:
- *   - RSI(14) from 1h candles
- *   - SMA(7), SMA(25) from 1h closes
+ *   - RSI(14) from 5m candles
+ *   - SMA(7), SMA(25) from 5m closes
  *   - EMA(12), EMA(26) for MACD crossover signal
  *   - Volume ratio (current vs 7-day average)
  *   - Price position within 24h range (0-100%)
@@ -25,7 +25,7 @@ import { checkEODHDQuota } from './eodhd-quota';
 const EODHD_API_KEY = process.env.EODHD_API_KEY || '';
 
 // ── Cache ────────────────────────────────────────────────────────────────
-const CANDLE_CACHE_TTL_NORMAL_MS = 15 * 60 * 1000;  // 15 min — standard
+const CANDLE_CACHE_TTL_NORMAL_MS = 2.5 * 60 * 1000;  // 2.5 min — ensures fresh fetch on 3-min cron
 const CANDLE_CACHE_TTL_THROTTLE_MS = 60 * 60 * 1000; // 60 min — conserve quota
 const candleCache: Map<string, { data: OHLCVCandle[]; ts: number }> = new Map();
 
@@ -62,13 +62,13 @@ export interface TechnicalIndicators {
 // ── Fetch 1h candles from EODHD ──────────────────────────────────────────
 
 /**
- * Fetches 7 days of 1h OHLCV candles for a given ticker.
+ * Fetches 3 days of 5m OHLCV candles for a given ticker.
  *
  * @param ticker      Plain arena ticker (e.g. "BTC", "SHEL", "GLD").
  * @param eodhdTicker Optional override for the full EODHD code (e.g. "SHEL.LSE").
  *                    Defaults to the crypto format: "<TICKER>-USD.CC".
  */
-export async function fetch1hCandles(
+export async function fetch5mCandles(
     ticker: string,
     eodhdTicker?: string,
 ): Promise<OHLCVCandle[]> {
@@ -115,9 +115,9 @@ export async function fetch1hCandles(
     // ── Live fetch ──────────────────────────────────────────────────────
     try {
         const eodhCode = eodhdTicker ?? `${upper}-USD.CC`;
-        const fromTs = Math.floor((now - 7 * 24 * 60 * 60 * 1000) / 1000);
+        const fromTs = Math.floor((now - 3 * 24 * 60 * 60 * 1000) / 1000);
         const toTs = Math.floor(now / 1000);
-        const url = `https://eodhd.com/api/intraday/${eodhCode}?api_token=${EODHD_API_KEY}&fmt=json&interval=1h&from=${fromTs}&to=${toTs}`;
+        const url = `https://eodhd.com/api/intraday/${eodhCode}?api_token=${EODHD_API_KEY}&fmt=json&interval=5m&from=${fromTs}&to=${toTs}`;
 
         const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) return cached?.data ?? [];
@@ -292,11 +292,11 @@ export async function fetchTechnicalDataForTokens(
 ): Promise<Record<string, TechnicalIndicators>> {
     const results: Record<string, TechnicalIndicators> = {};
 
-    // Fetch candles in parallel (each is 1 EODHD call, cached for 15 min)
+    // Fetch candles in parallel (cached for 2.5 min)
     const promises = tickers.map(async (ticker) => {
         const upper = ticker.toUpperCase();
         try {
-            const candles = await fetch1hCandles(upper);
+            const candles = await fetch5mCandles(upper);
             const price = prices[upper]?.price || 0;
             if (candles.length > 0 && price > 0) {
                 results[upper] = computeTechnicalIndicators(upper, candles, price);
@@ -318,7 +318,7 @@ export function formatTechnicalDataForPrompt(tech: TechnicalIndicators): string 
     const posLabel = tech.pricePosition24h > 80 ? 'NEAR HIGH' : tech.pricePosition24h < 20 ? 'NEAR LOW' : 'MID-RANGE';
 
     return `
-  COMPUTED TECHNICAL INDICATORS (from real 1h candle data — ${tech.candleCount} candles):
+  COMPUTED TECHNICAL INDICATORS (from real 5m candle data — ${tech.candleCount} candles):
   - RSI(14): ${tech.rsi14.toFixed(1)} [${rsiLabel}]
   - SMA(7): $${tech.sma7} | Price vs SMA7: ${tech.priceVsSma7 > 0 ? '+' : ''}${tech.priceVsSma7.toFixed(2)}%
   - SMA(25): $${tech.sma25} | Price vs SMA25: ${tech.priceVsSma25 > 0 ? '+' : ''}${tech.priceVsSma25.toFixed(2)}%
@@ -331,3 +331,40 @@ export function formatTechnicalDataForPrompt(tech: TechnicalIndicators): string 
   - Trend Direction: ${tech.trendDirection}
   - Support: $${tech.supportLevel} | Resistance: $${tech.resistanceLevel}`;
 }
+
+export async function fetchHistorical1hCandles(
+  ticker: string,
+  daysAgo: number = 7
+): Promise<OHLCVCandle[]> {
+  const upper = ticker.toUpperCase();
+  if (!EODHD_API_KEY) return [];
+  try {
+    const now = Date.now();
+    const eodhCode = `${upper}-USD.CC`;
+    const fromTs = Math.floor((now - daysAgo * 24 * 60 * 60 * 1000) / 1000);
+    const toTs = Math.floor(now / 1000);
+    const url = `https://eodhd.com/api/intraday/${eodhCode}?api_token=${EODHD_API_KEY}&fmt=json&interval=1h&from=${fromTs}&to=${toTs}`;
+
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return [];
+
+    const candles: OHLCVCandle[] = data.map((c: any) => ({
+      timestamp: c.timestamp || Math.floor(new Date(c.datetime || c.date).getTime() / 1000),
+      open: parseFloat(c.open) || 0,
+      high: parseFloat(c.high) || 0,
+      low: parseFloat(c.low) || 0,
+      close: parseFloat(c.close) || 0,
+      volume: parseFloat(c.volume) || 0,
+    })).filter((c: OHLCVCandle) => c.close > 0);
+
+    candles.sort((a, b) => a.timestamp - b.timestamp);
+    return candles;
+  } catch (e: any) {
+    console.error(`[TechAnalysis] Error fetching historical candles for ${upper}:`, e.message);
+    return [];
+  }
+}
+

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// SEMAPHORE ARENA — Constants & Types
+// SEMAPHORE — Constants & Types
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── ASSET CLASS IDENTIFIER ───────────────────────────────────────────────────
@@ -9,6 +9,7 @@ export type AssetClass = 'CRYPTO' | 'FTSE' | 'NYSE' | 'COMMODITIES';
 // Arenas that start in sandbox mode (no 28-day competition timer).
 // These are promoted to competition mode manually via the UI.
 export const SANDBOX_ASSET_CLASSES: AssetClass[] = ['FTSE', 'NYSE', 'COMMODITIES'];
+export const MOTHBALLED_ASSET_CLASSES: AssetClass[] = ['FTSE', 'NYSE', 'COMMODITIES'];
 
 // Per-class Firestore collection names.
 // CRYPTO uses the original collection names (backward-compatible, no suffix).
@@ -63,14 +64,14 @@ export function parseEODHDTicker(eodhdCode: string, assetClass: AssetClass): str
 }
 
 // ─── ARENA CONFIGURATION ─────────────────────────────────────────────────────
-export const ARENA_START_DATE = '2026-03-04T00:00:00Z';  // Wednesday 4th March
+export const ARENA_START_DATE = '2026-05-27T00:00:00Z';  // Wednesday 27th May
 export const ARENA_DURATION_DAYS = 28;
 export const ARENA_WEEK_LENGTH = 7;
-export const POOL_COUNT = 4;
-export const TOKENS_PER_POOL = 2;
-export const TOTAL_TOKENS = POOL_COUNT * TOKENS_PER_POOL; // 8
-export const POOL_BUDGET = 150; // $150 per pool — same for all asset classes
-export const TOTAL_BUDGET = POOL_COUNT * POOL_BUDGET; // $600
+export const POOL_COUNT = 2;
+export const TOKENS_PER_POOL = 1;
+export const TOTAL_TOKENS = POOL_COUNT * TOKENS_PER_POOL; // 2
+export const POOL_BUDGET = 525; // $525 per pool, total $1050
+export const TOTAL_BUDGET = 1050; // CRYPTO arena: actual total invested.
 
 // ─── API BUDGETS ─────────────────────────────────────────────────────────────
 export const EODHD_DAILY_LIMIT = 80_000;
@@ -85,6 +86,7 @@ export const HISTORICAL_DATA_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 export const FNG_INTERVAL_MS = 15 * 60 * 1000; // 15 min
 export const REVOLUT_HEALTH_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 export const REVOLUT_SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+export const DEEP_ANALYSIS_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // ─── TRADING DEFAULTS ────────────────────────────────────────────────────────
 export const STOP_LOSS_THRESHOLD = 0.25; // 25% drawdown triggers halt
@@ -108,10 +110,8 @@ export const AGENT_WATCHLIST_TIERS: Record<string, string[]> = {
 };
 
 export const AGENT_WATCHLIST = [
-    ...AGENT_WATCHLIST_TIERS.TIER1,
-    ...AGENT_WATCHLIST_TIERS.TIER2,
-    ...AGENT_WATCHLIST_TIERS.TIER3,
-    ...AGENT_WATCHLIST_TIERS.TIER4,
+    'XRP',
+    'AAVE',
 ];
 
 export const STABLECOIN_REJECT_LIST = [
@@ -126,59 +126,98 @@ export const STABLECOIN_REJECT_LIST = [
 // EODHD ticker format: {TICKER}.LSE   (e.g. SHEL.LSE)
 // Currency: GBP (£). Market hours: 08:00–16:30 London.
 // AI selects 4 pairs (8 stocks) from this universe during initialisation.
+// Expanded March 2026: 40 → 80 stocks for Intelligence Scanner coverage.
 export const FTSE_WATCHLIST: Record<string, string[]> = {
     BLUE_CHIP: ['SHEL', 'AZN', 'HSBA', 'BP', 'GSK', 'ULVR', 'RIO', 'DGE', 'LSEG', 'BA'],
     CORE_250: ['REL', 'EXPN', 'NXT', 'TSCO', 'BEZ', 'DPLM', 'MNDI', 'WPP', 'IMB', 'NG'],
     GROWTH: ['AUTO', 'CRH', 'III', 'GAW', 'HLMA', 'BRBY', 'JD', 'SSE', 'NWG', 'REX'],
     SPECULATIVE: ['IAG', 'FRES', 'TUI', 'ITV', 'STAN', 'SAGA', 'BBA', 'WEIR', 'SN', 'CHR'],
+    // ─── EXPANDED TIERS (Intelligence Scanner) ──────────────────────────
+    FTSE_100_EXT: ['BATS', 'RR', 'AAL', 'ANTO', 'ABF', 'LGEN', 'PHNX', 'MNG', 'LAND', 'SVT'],
+    MID_CAP_GROWTH: ['FOUR', 'DOCS', 'BME', 'SMDS', 'SSPG', 'PETS', 'PSON', 'ENT', 'AHT', 'SPX'],
+    INCOME: ['BNZL', 'RMV', 'SGRO', 'BDEV', 'PSN', 'SMIN', 'DARK', 'PAGE', 'CRDA', 'SDR'],
+    TURNAROUND: ['VOD', 'BT-A', 'MRO', 'CMCX', 'GENL', 'KIE', 'FEVR', 'MTRO', 'RTO', 'INCH'],
 };
 export const FTSE_INSTRUMENT_LIST = [
     ...FTSE_WATCHLIST.BLUE_CHIP,
     ...FTSE_WATCHLIST.CORE_250,
     ...FTSE_WATCHLIST.GROWTH,
     ...FTSE_WATCHLIST.SPECULATIVE,
+    ...FTSE_WATCHLIST.FTSE_100_EXT,
+    ...FTSE_WATCHLIST.MID_CAP_GROWTH,
+    ...FTSE_WATCHLIST.INCOME,
+    ...FTSE_WATCHLIST.TURNAROUND,
 ];
 
 // ─── NYSE ARENA INSTRUMENT UNIVERSE ──────────────────────────────────────────
 // EODHD ticker format: {TICKER}.US   (e.g. AAPL.US)
 // Currency: USD ($). Market hours: 09:30–16:00 Eastern (14:30–21:00 UTC).
 // AI selects 4 pairs (8 stocks) from this universe during initialisation.
+// Expanded March 2026: 40 → 100 stocks for Intelligence Scanner coverage.
 export const NYSE_WATCHLIST: Record<string, string[]> = {
     MEGA_CAP: ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'JPM', 'V', 'JNJ', 'BRK-B'],
     LARGE_GROW: ['TSLA', 'AMD', 'CRM', 'NOW', 'NFLX', 'UBER', 'PLTR', 'SHOP', 'PYPL', 'SQ'],
     VALUE_DIV: ['KO', 'PG', 'WMT', 'DIS', 'CAT', 'LMT', 'RTX', 'GE', 'UNH', 'MMM'],
     MOMENTUM: ['SMCI', 'ARM', 'MSTR', 'COIN', 'ANET', 'APP', 'HOOD', 'SLB', 'OXY', 'RBLX'],
+    // ─── EXPANDED TIERS (Intelligence Scanner) ──────────────────────────
+    TECH_EXT: ['AVGO', 'ADBE', 'INTC', 'MU', 'QCOM', 'PANW', 'SNOW', 'NET', 'CRWD', 'ZS'],
+    HEALTHCARE: ['LLY', 'ABBV', 'PFE', 'MRK', 'GILD', 'AMGN', 'ISRG', 'DXCM', 'VEEV', 'HIMS'],
+    FINANCIALS: ['GS', 'MS', 'BAC', 'WFC', 'C', 'BX', 'SCHW', 'AXP', 'SPGI', 'ICE'],
+    INDUSTRIALS: ['XOM', 'CVX', 'BA', 'HON', 'DE', 'UPS', 'FDX', 'WM', 'ETN', 'IR'],
+    CONSUMER: ['COST', 'TGT', 'LOW', 'NKE', 'SBUX', 'MCD', 'LULU', 'BURL', 'DECK', 'ROST'],
+    SMALL_CAP_MOM: ['IONQ', 'RGTI', 'SOUN', 'RKLB', 'OKLO', 'SMR', 'BYRN', 'SOFI', 'RIVN', 'LCID'],
 };
 export const NYSE_INSTRUMENT_LIST = [
     ...NYSE_WATCHLIST.MEGA_CAP,
     ...NYSE_WATCHLIST.LARGE_GROW,
     ...NYSE_WATCHLIST.VALUE_DIV,
     ...NYSE_WATCHLIST.MOMENTUM,
+    ...NYSE_WATCHLIST.TECH_EXT,
+    ...NYSE_WATCHLIST.HEALTHCARE,
+    ...NYSE_WATCHLIST.FINANCIALS,
+    ...NYSE_WATCHLIST.INDUSTRIALS,
+    ...NYSE_WATCHLIST.CONSUMER,
+    ...NYSE_WATCHLIST.SMALL_CAP_MOM,
 ];
 
 // ─── COMMODITIES ARENA INSTRUMENT UNIVERSE ────────────────────────────────────
 // Uses commodity ETFs listed on NYSE — all confirmed available via EODHD .US
 // Grouped by category so the AI can build diversified cross-category pools.
-// Ticker keys are the ETF symbols (e.g. GLD, SLV, USO).
+// Expanded March 2026: 12 → 30 ETFs for Intelligence Scanner coverage.
 export const COMMODITIES_WATCHLIST: Record<string, string[]> = {
-    PRECIOUS: ['GLD', 'SLV', 'PPLT', 'PALL'],   // Gold, Silver, Platinum, Palladium ETFs
-    ENERGY: ['USO', 'UNG', 'BNO'],              // WTI Oil, Natural Gas, Brent Oil ETFs
-    AGRICULTURAL: ['WEAT', 'CORN', 'SOYB'],           // Wheat, Corn, Soybean ETFs
-    BASE_METALS: ['CPER', 'REMX'],                   // Copper, Rare Earth Metals ETFs
+    PRECIOUS: ['GLD', 'SLV', 'PPLT', 'PALL'],        // Gold, Silver, Platinum, Palladium
+    PRECIOUS_EXT: ['IAU', 'SGOL', 'GLTR'],            // iShares Gold, Aberdeen Gold, Multi-Precious
+    ENERGY: ['USO', 'UNG', 'BNO'],                    // WTI Oil, Natural Gas, Brent Oil
+    ENERGY_EXT: ['XOP', 'OIH', 'BOIL', 'KOLD'],      // Oil & Gas E&P, Oil Services, 2× Gas Bull/Bear
+    AGRICULTURAL: ['WEAT', 'CORN', 'SOYB'],           // Wheat, Corn, Soybean
+    AGRICULTURAL_EXT: ['JO', 'CANE', 'NIB', 'DBA'],   // Coffee, Sugar, Cocoa, Ag Index
+    BASE_METALS: ['CPER', 'REMX'],                    // Copper, Rare Earth Metals
+    INDUSTRIAL_METALS: ['SLX', 'PICK'],               // Steel, Mining
+    URANIUM_LITHIUM: ['URA', 'URNM', 'LIT'],          // Uranium Mining, Uranium Concentrated, Lithium & Battery
 };
 export const COMMODITIES_INSTRUMENT_LIST = [
     ...COMMODITIES_WATCHLIST.PRECIOUS,
+    ...COMMODITIES_WATCHLIST.PRECIOUS_EXT,
     ...COMMODITIES_WATCHLIST.ENERGY,
+    ...COMMODITIES_WATCHLIST.ENERGY_EXT,
     ...COMMODITIES_WATCHLIST.AGRICULTURAL,
+    ...COMMODITIES_WATCHLIST.AGRICULTURAL_EXT,
     ...COMMODITIES_WATCHLIST.BASE_METALS,
+    ...COMMODITIES_WATCHLIST.INDUSTRIAL_METALS,
+    ...COMMODITIES_WATCHLIST.URANIUM_LITHIUM,
 ];
 
 // Human-readable display names for commodity ETFs (used in UI + AI prompts)
 export const COMMODITIES_DISPLAY_NAMES: Record<string, string> = {
     GLD: 'Gold ETF', SLV: 'Silver ETF', PPLT: 'Platinum ETF', PALL: 'Palladium ETF',
+    IAU: 'iShares Gold ETF', SGOL: 'Aberdeen Gold ETF', GLTR: 'Multi-Precious Metals ETF',
     USO: 'WTI Oil ETF', UNG: 'Natural Gas ETF', BNO: 'Brent Oil ETF',
+    XOP: 'Oil & Gas E&P ETF', OIH: 'Oil Services ETF', BOIL: 'Natural Gas Bull 2× ETF', KOLD: 'Natural Gas Bear 2× ETF',
     WEAT: 'Wheat ETF', CORN: 'Corn ETF', SOYB: 'Soybeans ETF',
+    JO: 'Coffee ETF', CANE: 'Sugar ETF', NIB: 'Cocoa ETF', DBA: 'Agriculture Index ETF',
     CPER: 'Copper ETF', REMX: 'Rare Earth ETF',
+    SLX: 'Steel ETF', PICK: 'Mining ETF',
+    URA: 'Uranium Mining ETF', URNM: 'Uranium Concentrated ETF', LIT: 'Lithium & Battery ETF',
 };
 
 // Helper: get the watchlist for any asset class
@@ -208,7 +247,7 @@ export function getBenchmarkLabel(assetClass: AssetClass): string {
 
 // Arena theme colours per asset class (used for CSS custom property injection)
 export const ARENA_THEME: Record<AssetClass, { primary: string; secondary: string; glow: string }> = {
-    CRYPTO: { primary: '#4ba3e3', secondary: '#0b5394', glow: 'rgba(75,163,227,0.15)' },
+    CRYPTO: { primary: '#10b981', secondary: '#047857', glow: 'rgba(16,185,129,0.15)' },
     FTSE: { primary: '#10b981', secondary: '#065f46', glow: 'rgba(16,185,129,0.15)' },
     NYSE: { primary: '#f59e0b', secondary: '#92400e', glow: 'rgba(245,158,11,0.15)' },
     COMMODITIES: { primary: '#ef4444', secondary: '#7f1d1d', glow: 'rgba(239,68,68,0.15)' },
@@ -218,7 +257,7 @@ export const ARENA_THEME: Record<AssetClass, { primary: string; secondary: strin
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
-export type PoolId = 'POOL_1' | 'POOL_2' | 'POOL_3' | 'POOL_4';
+export type PoolId = 'POOL_1' | 'POOL_2' | 'POOL_3' | 'POOL_4' | 'POOL_MANUAL';
 
 export interface PoolStrategy {
     buyScoreThreshold: number;
@@ -258,7 +297,8 @@ export interface PoolStrategy {
     gpmDefensiveZoneScore?: number;   // Score below which DEFENSIVE fires — sell to defensivePositionPct (default 55)
     gpmCautionPositionPct?: number;   // Target holding % of maxAlloc in CAUTION zone (default 50)
     gpmDefensivePositionPct?: number; // Target holding % of maxAlloc in DEFENSIVE zone (default 25)
-    gpmConfirmationCycles?: number;   // Consecutive evaluations in a zone before a partial sell fires (default 2)
+    gpmConfirmationCycles?: number;   // Consecutive evaluations in a zone before a partial sell fires (default 3)
+    gpmScaleDownCooldownHours?: number; // Minimum hours between GPM scale-down and scale-up for same token (default 6)
 }
 
 export interface PoolHolding {
@@ -267,15 +307,44 @@ export interface PoolHolding {
     peakPrice: number;             // Highest price since entry
     peakPnlPct: number;            // Highest P&L % since entry (for trailing stop)
     boughtAt?: string;
+    userDirected?: boolean;        // True if position was manually opened or synced from Revolut as a new trade
     // ─── GPM state (persisted per holding) ──────────────────────────────
     gpmZone?: 'CONVICTION' | 'CAUTION' | 'DEFENSIVE';  // Current GPM tier
     gpmZoneConsecutiveCycles?: number;                  // Consecutive evals in current zone (confirmation gate)
+    gpmLastScaleDownAt?: string;                        // ISO timestamp of last GPM scale-down (cooldown enforcement)
+    gpmLastScaleDownZone?: 'CAUTION' | 'DEFENSIVE';     // Zone of last scale-down (prevents re-firing in same zone)
+    // ─── Manual Settings (per-token override for POOL_MANUAL) ───────────
+    settings?: {
+        stopLoss?: number;      // e.g. -8 for -8%
+        takeProfit?: number;    // e.g. 15 for 15%
+        trailingStop?: number;  // e.g. 2 for 2%
+        gpmEnabled?: boolean;   // if true, use pool-level GPM logic with these targets
+        gpmCautionScore?: number;
+        gpmDefensiveScore?: number;
+        gpmCautionPct?: number;
+        gpmDefensivePct?: number;
+    };
+}
+
+export interface BuybackStage {
+    thresholdPct: number; // % drop from last sell price to trigger (e.g. 5 = 5% drop)
+    amount: number;       // absolute amount to invest at this stage ($/£)
+    completed?: boolean;
+    ts?: string;          // ISO timestamp of completion
+}
+
+export interface BuybackConfig {
+    enabled: boolean;
+    stages: BuybackStage[];
+    lastSellPrice?: number; // Snapshot of price when config was enabled/updated
 }
 
 export interface PoolPerformance {
     startDate: string;
     totalPnl: number;
     totalPnlPct: number;
+    realizedPnl?: number;
+    unrealizedPnl?: number;
     winCount: number;
     lossCount: number;
     totalTrades: number;
@@ -304,11 +373,72 @@ export interface WeeklyReview {
     timestamp: string;
 }
 
+// ─── SCENARIO C: SELECTIVE CATALYST ROTATION ────────────────────────────────
+// Emitted once per successful EOD ticker swap and stored in pool.rotationHistory.
+export interface PoolRotationEvent {
+    rotatedAt: string;         // ISO timestamp of the rotation
+    outTicker: string;         // ticker that was replaced
+    inTicker: string;          // ticker that replaced it
+    idleDays: number;          // consecutive idle sessions that triggered the swap
+    aiReasoning: string;       // AI catalyst + rationale
+    priceContext: {
+        outTickerLast24h: number;  // 24h % change of the removed ticker at swap time
+        inTickerLast24h: number;   // 24h % change of the incoming ticker at swap time
+    };
+}
+
+// ─── INTELLIGENCE SCANNER TYPES ─────────────────────────────────────────────
+// The Intelligence Scanner runs twice daily (AM pre-market + PM post-market)
+// scanning the full expanded universe and selecting the best candidates
+// for each pool. Dual Confirmation Gate: a stock must score well in BOTH
+// AM and PM scans before it can be promoted into an active pool.
+
+export interface ScanCandidate {
+    ticker: string;
+    displayName: string;
+    price: number;
+    change24h: number;
+    volume: number;
+    // Multi-factor scoring (4 pillars × 25 points each = 100 total)
+    newsCatalystScore: number;     // 0-25: Breaking news, earnings, analyst actions
+    technicalScore: number;        // 0-25: RSI, MACD, MA crossover, volume
+    valueScore: number;            // 0-25: Price vs 52wk range, sector-relative
+    macroScore: number;            // 0-25: Alignment with macro regime
+    compositeScore: number;        // 0-100: Weighted sum of above
+    // Rich data
+    newsHeadlines: string[];       // Top 3 recent headlines
+    technicalSummary: string;      // Computed technical indicators summary
+    aiSummary: string;             // AI-generated 2-3 sentence analysis
+}
+
+export interface IntelligenceScanResult {
+    scanId: string;                // UUID-like identifier
+    arena: AssetClass;
+    scanType: 'MORNING' | 'EVENING';
+    scanTimestamp: string;         // ISO
+    poolId: PoolId;
+    universeSize: number;          // Total stocks scanned
+    topCandidates: ScanCandidate[]; // Top 10, ranked by compositeScore
+    promotionCandidates: string[];  // Top 2 tickers for promotion (evening only)
+    confirmed: boolean;            // True if AM + PM agree on promotion candidate
+}
+
+export interface PoolPromotionEvent {
+    promotedAt: string;            // ISO
+    inTicker: string;              // Ticker promoted into pool
+    outTicker?: string;            // Ticker replaced (if replacement, not addition)
+    replacementReason?: string;    // Why the outgoing ticker was replaced
+    morningScore: number;          // AM scan composite score
+    eveningScore: number;          // PM scan composite score
+    newsContext: string;           // Key news driving the promotion
+    aiReasoning: string;           // Full AI rationale
+}
+
 export interface ArenaPool {
     poolId: PoolId;
     name: string;
     emoji: string;
-    tokens: [string, string];
+    tokens: string[];
     strategy: PoolStrategy;
     strategyHistory: StrategyChange[];
     budget: number;
@@ -323,6 +453,7 @@ export interface ArenaPool {
     lastSoldAt?: Record<string, string>;      // ISO timestamp per token — anti-wash tracking (all sells)
     lastStopLossedAt?: Record<string, string>; // ISO timestamp per token — set ONLY on stop-loss exits (shorter re-entry cooldown)
     stopLossExitPrices?: Record<string, number>; // Price at which each token was stop-lossed — used by Phase C Rebound Watch
+    lastSellPrices?: Record<string, number>;   // Price at which each token was last sold (any type) — used for buy-back-lower gate
 
     // ─── SCORE MEMORY ─────────────────────────────────────────────────
     // Last N scores per token, persisted across cron cycles.
@@ -338,6 +469,27 @@ export interface ArenaPool {
     dcaReserve?: number;         // DCA cash available for deployment ($)
     dcaContributions?: number;   // Lifetime DCA capital credited to this pool ($)
     dcaDeployedTotal?: number;   // Lifetime DCA capital actually deployed ($)
+
+    // ─── SCENARIO C: SELECTIVE CATALYST ROTATION ──────────────────────
+    // Tracks consecutive idle sessions per ticker and controls EOD rotation.
+    // Rotation fires only when a ticker has been held-free for ≥ 3 sessions
+    // AND the pool has not rotated within the last 7 calendar days.
+    consecutiveIdleDays?: Record<string, number>; // sessions with zero holdings
+    lastRotationAt?: string;                      // ISO — last successful swap
+    rotationHistory?: PoolRotationEvent[];        // full audit trail of all swaps
+
+    // ─── INTELLIGENCE SCANNER ────────────────────────────────────────
+    // Stores AM/PM scan results and promotions for this pool.
+    lastMorningScan?: IntelligenceScanResult;      // Latest AM scan result
+    lastEveningScan?: IntelligenceScanResult;      // Latest PM scan result
+    promotionHistory?: PoolPromotionEvent[];       // Full audit trail of promotions
+    lastPromotionAt?: string;                      // ISO — last successful promotion
+    
+    // ─── AUTOMATIC BUYBACK ────────────────────────────────────────────
+    // Per-token buyback configurations. If enabled, the system will 
+    // automatically execute laddered buys when the price drops by 
+    // the specified percentages from the last sell price.
+    buybackConfigs?: Record<string, BuybackConfig>;
 }
 
 export interface ArenaConfig {
@@ -354,6 +506,44 @@ export interface ArenaConfig {
     competitionMode?: boolean;
     /** True while a non-crypto arena is still in sandbox/testing mode */
     sandboxMode?: boolean;
+    /** BTC and XRP prices recorded at competition start — used for buy-and-hold benchmark */
+    benchmarkStartPrices?: {
+        BTC: number;
+        XRP: number;
+        recordedAt: string;  // ISO timestamp when recorded
+    };
+    /** Daily BTC prices (OHLC) — recorded each arena cycle + backfilled from EODHD.
+     *  Used for accurate weekly BTC comparison in the Sunday report. */
+    btcDailyPrices?: Record<string, { open: number; close: number; high: number; low: number }>;
+    /** Shared DCA reserve — single pot accessible to all pools. Strongest candidate wins. */
+    sharedDcaReserve?: number;
+    /** Lifetime total DCA capital credited to the shared reserve ($) */
+    sharedDcaContributions?: number;
+    /** Lifetime total DCA capital deployed from the shared reserve ($) */
+    sharedDcaDeployed?: number;
+    /** ISO timestamp of last Revolut balance sync — prevents syncing more than once per hour */
+    lastRevolutSyncAt?: string;
+    /**
+     * Dynamic shared cash pool — ALL trading cash lives here.
+     * When a pool sells, proceeds route here. When a pool buys, cash is drawn from here.
+     * Strongest conviction signal across all pools gets cash first each cycle.
+     * pool.cashBalance is kept at 0 and only used as a transit field during buy execution.
+     */
+    sharedCash?: number;
+    /** Master Portfolio Mode: single pool mirroring real Revolut holdings */
+    masterPortfolioMode?: boolean;
+    /** Sell-Only Mode: prevent all automated buys */
+    sellOnlyMode?: boolean;
+    /** Last time the 4-hour deep analysis was performed */
+    lastDeepAnalysisAt?: string;
+    /** Flag to permanently halt the system if drawdown limits are breached */
+    systemHalted?: boolean;
+    /** Trailing 24h peak for NAV tracking */
+    trailing24hPeak?: { value: number; timestamp: string };
+    /** Trailing 72h peak for NAV tracking */
+    trailing72hPeak?: { value: number; timestamp: string };
+    /** Switch to enable live capital execution via Revolut X */
+    realTradingEnabled?: boolean;
 }
 
 // ─── DCA SYSTEM TYPES ─────────────────────────────────────────────────────────────────
@@ -504,3 +694,14 @@ export const PROFILE_DEFAULTS: Record<string, any> = {
         strategyLabel: 'Custom', strategyDescription: 'User-defined parameters',
     },
 };
+
+export interface TokenAnalysis {
+    ticker: string;
+    timestamp: string;
+    score: number;
+    reflection: string;
+    techVerdict: string;
+    sentiment: string;
+    actionableInsight: string;
+    btcComparison?: string;
+}

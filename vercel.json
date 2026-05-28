@@ -23,6 +23,30 @@
         {
             "path": "/api/cron/dca-deposit",
             "schedule": "5 9 * * 6"
+        },
+        {
+            "path": "/api/cron/scan-ftse",
+            "schedule": "0 7 * * 1-5"
+        },
+        {
+            "path": "/api/cron/scan-ftse",
+            "schedule": "50 16 * * 1-5"
+        },
+        {
+            "path": "/api/cron/scan-nyse",
+            "schedule": "0 13 * * 1-5"
+        },
+        {
+            "path": "/api/cron/scan-nyse",
+            "schedule": "15 21 * * 1-5"
+        },
+        {
+            "path": "/api/cron/scan-commodities",
+            "schedule": "0 13 * * 1-5"
+        },
+        {
+            "path": "/api/cron/scan-commodities",
+            "schedule": "15 21 * * 1-5"
         }
     ]
 }

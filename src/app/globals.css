@@ -254,3 +254,59 @@
     transform: scale(1.15) translate(-30px, 40px) rotate(-5deg);
   }
 }
+
+@keyframes price-up-pulse {
+  0% { background-color: rgba(76, 175, 80, 0.2); }
+  100% { background-color: transparent; }
+}
+
+@keyframes price-down-pulse {
+  0% { background-color: rgba(255, 102, 89, 0.2); }
+  100% { background-color: transparent; }
+}
+
+.price-up {
+  color: var(--c-green-light);
+  animation: price-up-pulse 1s ease-out;
+}
+
+.price-down {
+  color: var(--c-red-light);
+  animation: price-down-pulse 1s ease-out;
+}
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  color: var(--c-text-muted);
+}
+
+.live-indicator-dot {
+  width: 4px;
+  height: 4px;
+  background: var(--c-blue-light);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--c-blue-light);
+  animation: blink 2s infinite;
+}
+
+@keyframes animate-ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-ticker {
+  animation: animate-ticker 30s linear infinite;
+}
+
+.hover\:pause:hover {
+  animation-play-state: paused;
+}

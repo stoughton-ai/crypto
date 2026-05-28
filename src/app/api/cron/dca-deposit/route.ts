@@ -21,7 +21,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
-import { getArenaConfig, creditDcaReserve, getDcaConfig } from '@/services/arenaService';
+import { getArenaConfig, creditSharedDcaReserve, getDcaConfig } from '@/services/arenaService';
 import { getPoolTotalValue } from '@/services/arenaService';
 import type { PoolId } from '@/lib/constants';
 
@@ -106,34 +106,20 @@ export async function GET(req: NextRequest) {
                         lastDepositDate: today, // Mark today so we don't keep checking
                     }, { merge: true });
 
-                    const message = `⏸️ DCA skipped — market has recovered.\nFear & Greed: ${marketCondition.fng}/100\nBTC 30d: ${marketCondition.btc30d.toFixed(1)}%\nPortfolio: ${(navRatio * 100).toFixed(1)}% of invested capital\n\nWatching for re-entry into bear conditions.`;
+                    const message = `⏸️ DCA skipped — market has recovered.\nFear & Greed: ${marketCondition.fng}/100\nBTC 30d: ${marketCondition.btc30d.toFixed(1)}%
+Portfolio: ${(navRatio * 100).toFixed(1)}% of invested capital\n\nWatching for re-entry into bear conditions.`;
                     await sendTelegramAlert(userId, message);
 
                     results[userId.substring(0, 8)] = { paused: true, reason: 'market_recovered' };
                     continue;
                 }
 
-                // ── 4. Ask AI to decide pool split ───────────────────────────
-                const split = await aiDecidePoolSplit(arena, activePools.length, DCA_WEEKLY_AMOUNT, prices);
+                // ── 4. Credit full amount to shared DCA reserve ───────────
+                // The shared reserve is a single pot — whichever pool has the
+                // strongest candidate during the arena cycle gets to use it.
+                await creditSharedDcaReserve(userId, DCA_WEEKLY_AMOUNT, userMarketCondition);
 
-                // ── 5. Credit each pool's dcaReserve ────────────────────────
-                const credited: Record<string, number> = {};
-                for (const pool of activePools) {
-                    const amount = split[pool.poolId] ?? 0;
-                    if (amount <= 0) continue;
-
-                    await creditDcaReserve(userId, pool.poolId as PoolId, amount, userMarketCondition);
-                    credited[pool.poolId] = amount;
-                }
-
-                // ── 6. Send Telegram summary ─────────────────────────────────
-                const splitLines = Object.entries(credited)
-                    .map(([pid, amt]) => {
-                        const p = arena.pools.find(x => x.poolId === pid);
-                        return `  ${p?.emoji ?? '●'} ${p?.name ?? pid}: +$${amt.toFixed(2)}`;
-                    })
-                    .join('\n');
-
+                // ── 5. Send Telegram summary ─────────────────────────────────
                 const message = [
                     `💰 *Weekly DCA Deposit — ${today}*`,
                     ``,
@@ -142,17 +128,14 @@ export async function GET(req: NextRequest) {
                     `  BTC 30d: ${marketCondition.btc30d.toFixed(1)}%`,
                     `  Portfolio NAV: ${(navRatio * 100).toFixed(1)}% of invested`,
                     ``,
-                    `$${DCA_WEEKLY_AMOUNT} credited (AI-decided split):`,
-                    splitLines,
-                    ``,
-                    `AI will deploy when conviction score ≥ 85`,
-                    `(Full reserve deploy at score ≥ 90)`,
+                    `$${DCA_WEEKLY_AMOUNT} credited to shared DCA reserve`,
+                    `Strongest candidate across all pools will deploy when conviction ≥ 85`,
                 ].join('\n');
 
                 await sendTelegramAlert(userId, message);
 
-                results[userId.substring(0, 8)] = { credited, total: DCA_WEEKLY_AMOUNT };
-                console.log(`[DCA Cron] ✅ ${userId.substring(0, 8)} credited $${DCA_WEEKLY_AMOUNT}: ${JSON.stringify(credited)}`);
+                results[userId.substring(0, 8)] = { credited: DCA_WEEKLY_AMOUNT, shared: true };
+                console.log(`[DCA Cron] ✅ ${userId.substring(0, 8)} credited $${DCA_WEEKLY_AMOUNT} to shared reserve`);
 
             } catch (userErr: any) {
                 console.error(`[DCA Cron] Error for ${userId.substring(0, 8)}: ${userErr.message}`);

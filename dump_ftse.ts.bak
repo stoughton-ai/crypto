@@ -1,0 +1,41 @@
+import * as fs from 'fs';
+const envStr = fs.readFileSync('.env.local', 'utf8');
+for (const line of envStr.split('\n')) {
+  if (line.startsWith('FIREBASE_SERVICE_ACCOUNT_JSON=')) {
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON = line.substring('FIREBASE_SERVICE_ACCOUNT_JSON='.length).replace(/\r$/, '');
+  } else if (line.startsWith('EODHD_API_KEY=')) {
+    process.env.EODHD_API_KEY = line.substring('EODHD_API_KEY='.length).replace(/\r$/, '');
+  }
+}
+
+async function main() {
+  const { adminDb } = await import('./src/lib/firebase-admin');
+  const users = await adminDb!.collection('arena_config_ftse').limit(1).get();
+  if (users.empty) return;
+  
+  const userId = users.docs[0].id;
+  const doc = await adminDb!.collection('arena_config_ftse').doc(userId).get();
+  const data = doc.data();
+  console.log(JSON.stringify({
+    totalBudget: data?.totalBudget,
+    sharedCash: data?.sharedCash,
+    sharedDcaContributions: data?.sharedDcaContributions,
+    sharedDcaReserve: data?.sharedDcaReserve,
+    sharedDcaDeployed: data?.sharedDcaDeployed,
+    pools: data?.pools?.map((p: any) => ({
+        id: p.poolId,
+        budget: p.budget,
+        cashBalance: p.cashBalance,
+        holdings: Object.keys(p.holdings || {}).map(k => ({ ticker: k, amount: p.holdings[k].amount, avgP: p.holdings[k].averagePrice }))
+    }))
+  }, null, 2));
+
+  // Also fetch the current price for these holdings
+  const { fetchSandboxArenaPrices } = await import('./src/app/actions');
+  const tickers = new Set<string>();
+  data?.pools?.forEach((p: any) => Object.keys(p.holdings || {}).forEach(k => tickers.add(k)));
+  const priceMap = await (fetchSandboxArenaPrices as any)([...tickers], 'FTSE');
+  console.log('Prices:', JSON.stringify(priceMap, null, 2));
+}
+
+main().catch(console.error);

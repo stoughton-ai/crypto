@@ -349,6 +349,32 @@ export class RevolutX {
         return this.request('GET', '/api/1.0/tickers', undefined, undefined, 'tickers');
     }
 
+    /**
+     * Gets the latest price for a specific ticker from Revolut X.
+     * Useful for manual tokens not found on EODHD/CG.
+     */
+    async getTickerPrice(ticker: string): Promise<{ price: number; change24h: number } | null> {
+        try {
+            const up = ticker.toUpperCase();
+            // Revolut X symbol format: "BTC/USD" or "BTC-USD" depending on the endpoint
+            // /api/1.0/tickers uses "/"
+            const instruments = await this.getInstruments();
+            const list = instruments?.data || [];
+            const data = list.find((t: any) => t.symbol === `${up}/USD` || t.symbol === up);
+            
+            if (data && data.last_price) {
+                return {
+                    price: parseFloat(data.last_price),
+                    change24h: 0 // Tickers endpoint doesnt return 24h change in the data array
+                };
+            }
+            return null;
+        } catch (e: any) {
+            console.error(`[RevolutX] Error fetching ticker price for ${ticker}:`, e.message);
+            return null;
+        }
+    }
+
     async getHoldings(): Promise<RevolutHolding[]> {
         const accounts = await this.getBalances();
         console.log(`[RevolutX] Raw Accounts:`, JSON.stringify(accounts));
@@ -376,6 +402,8 @@ export class RevolutX {
         price?: string,
         type: 'market' | 'limit'
     }) {
+        console.warn(`[RevolutX] Emergency halt: Real trading is disabled. Blocked ${params.side} for ${params.symbol}.`);
+        throw new Error("Emergency halt: Real trading is currently disabled.");
         const formattedSymbol = params.symbol.replace('/', '-');
         const body: any = {
             client_order_id: crypto.randomUUID(),

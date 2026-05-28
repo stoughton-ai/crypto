@@ -2,9 +2,9 @@ import type { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
     return {
-        name: 'Crypto X Intel',
-        short_name: 'Crypto X Intel',
-        description: 'Advanced crypto research using AI Research Analyst',
+        name: 'Semaphore',
+        short_name: 'Semaphore',
+        description: 'Semaphore — AI-powered multi-arena trading platform',
         start_url: '/',
         display: 'standalone',
         background_color: '#000000',

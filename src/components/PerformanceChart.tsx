@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
     ResponsiveContainer,
     ComposedChart,
@@ -45,7 +45,7 @@ function CustomTooltip({
                     {point?.label ?? "—"}
                 </span>
                 <span className="font-mono text-[9px] text-[#555]">
-                    {point?.date ? new Date(point.date + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : ""}
+                    {point?.date ? new Date(point.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
                 </span>
             </div>
 
@@ -77,7 +77,7 @@ function CustomTooltip({
                 {point?.navTotal !== undefined && (
                     <div className="flex items-center justify-between pt-1 mt-1 border-t border-[#272a35]">
                         <span className="font-mono text-[9px] text-[#555] uppercase tracking-widest">Portfolio Value</span>
-                        <span className="font-mono text-[11px] text-white font-bold">${point.navTotal.toFixed(2)}</span>
+                        <span className="font-mono text-[11px] text-white font-bold">${(point.portfolioValue ?? point.navTotal).toFixed(2)}</span>
                     </div>
                 )}
 
@@ -109,11 +109,19 @@ function CustomTooltip({
     );
 }
 
-// ─── Custom dot — only render on the final (live) data point ─────────────
+// ─── Custom dot — renders only on the final (live) data point with a pulse ─
 function TailDot(props: any) {
     const { cx, cy, isLast, stroke: color } = props;
-    if (!isLast || !cx || !cy) return null;
-    return <circle cx={cx} cy={cy} r={4} fill={color} stroke="#0a0a0c" strokeWidth={2} />;
+    if (!cx || !cy || !isLast) return null;
+    return (
+        <g>
+            <circle cx={cx} cy={cy} r={8} stroke={color} strokeWidth={0.5} fill={color} opacity={0.25}>
+               <animate attributeName="r" from="4" to="12" dur="1.5s" begin="0s" repeatCount="indefinite" />
+               <animate attributeName="opacity" from="0.4" to="0" dur="1.5s" begin="0s" repeatCount="indefinite" />
+            </circle>
+            <circle cx={cx} cy={cy} r={4} fill={color} stroke="#0a0a0c" strokeWidth={2} />
+        </g>
+    );
 }
 
 // ─── Trade marker shape ───────────────────────────────────────────────────
@@ -133,13 +141,14 @@ function TradeShape(props: any) {
 }
 
 // ─── Series toggle button ─────────────────────────────────────────────────
-function SeriesToggle({ color, label, active, onClick }: {
-    color: string; label: string; active: boolean; onClick: () => void;
+function SeriesToggle({ color, label, active, onClick, dashed }: {
+    color: string; label: string; active: boolean; onClick: () => void; dashed?: boolean;
 }) {
     return (
-        <button onClick={onClick} className="flex items-center gap-1.5 px-2 py-1 transition-opacity" style={{ opacity: active ? 1 : 0.32 }}>
-            <span className="w-7 h-0.5 rounded-full shrink-0" style={{ background: color, boxShadow: active ? `0 0 5px ${color}` : "none" }} />
-            <span className="font-mono text-[10px] text-[#adb5c4] whitespace-nowrap">{label}</span>
+        <button onClick={onClick} className="flex items-center gap-1.5 px-1 md:px-2 py-1 transition-opacity text-left" style={{ opacity: active ? 1 : 0.32 }}>
+            <span className={`w-5 md:w-7 h-0.5 rounded-full shrink-0 ${dashed ? 'border-t-2 border-dashed' : ''}`} 
+                  style={{ background: dashed ? 'transparent' : color, borderColor: dashed ? color : 'transparent', boxShadow: active && !dashed ? `0 0 5px ${color}` : "none" }} />
+            <span className="font-mono text-[9px] md:text-[10px] text-[#adb5c4] truncate">{label}</span>
         </button>
     );
 }
@@ -149,11 +158,44 @@ export default function PerformanceChart({ history }: { history: PerformanceHist
     const { dataPoints, tradeMarkers, pools, budget, currentNAV, currentPnlPct } = history;
 
     const [showNav, setShowNav] = useState(true);
+    const [showBtc, setShowBtc] = useState(true);
     const [showPools, setShowPools] = useState<Record<string, boolean>>(
-        Object.fromEntries(pools.map(p => [p.poolId, true]))
+        Object.fromEntries(pools.map(p => [p.poolId, true])) // Default all active pools ON
     );
+    const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
     const [showTrades, setShowTrades] = useState(true);
     const [view, setView] = useState<"pct" | "abs">("pct");
+
+    // Extract all tokens that appear in the dataset (> $1)
+    const availableTokens = useMemo(() => {
+        const tokensSet = new Set<string>();
+        dataPoints.forEach(dp => {
+            if (dp.tokens) {
+                Object.keys(dp.tokens).forEach(t => tokensSet.add(t));
+            }
+        });
+        return Array.from(tokensSet).sort();
+    }, [dataPoints]);
+
+    // Token colors
+    const tokenColors = useMemo(() => {
+        const colors = ["#fbc02d", "#7b1fa2", "#c2185b", "#0288d1", "#00796b", "#689f38", "#e64a19", "#5d4037"];
+        return Object.fromEntries(availableTokens.map((t, i) => [t, colors[i % colors.length]]));
+    }, [availableTokens]);
+
+    // Effect to enable tokens by default as they appear in the history
+    useEffect(() => {
+        if (availableTokens.length > 0) {
+            setShowTokens(prev => {
+                const next = { ...prev };
+                let changed = false;
+                availableTokens.forEach(t => {
+                   if (next[t] === undefined) { next[t] = true; changed = true; }
+                });
+                return changed ? next : prev;
+            });
+        }
+    }, [availableTokens]);
 
     // ── Assign a stable numeric index to each data point ─────────────────
     // This is the key fix: using numeric X axis prevents Scatter from
@@ -213,14 +255,26 @@ export default function PerformanceChart({ history }: { history: PerformanceHist
         enrichedData.forEach(dp => {
             if (view === "pct") {
                 if (showNav) vals.push(dp.navPct);
+                if (showBtc && dp.btcPrice) {
+                    // map btc price to % change relative to first non-zero point in dataset
+                    const firstBtc = enrichedData.find(d => (d.btcPrice || 0) > 0)?.btcPrice || dp.btcPrice;
+                    vals.push(((dp.btcPrice - firstBtc) / firstBtc) * 100);
+                }
                 pools.forEach(p => { if (showPools[p.poolId]) vals.push(dp.pools[p.poolId]?.pnlPct ?? 0); });
+                availableTokens.forEach(t => { 
+                    if (showTokens[t] && dp.tokens?.[t]) {
+                        const firstVal = enrichedData.find(d => d.tokens?.[t])?.tokens?.[t].price || dp.tokens[t].price;
+                        vals.push(((dp.tokens[t].price - firstVal) / firstVal) * 100);
+                    }
+                });
             } else {
                 if (showNav) vals.push(dp.navTotal);
                 pools.forEach(p => { if (showPools[p.poolId]) vals.push(dp.pools[p.poolId]?.value ?? 0); });
+                availableTokens.forEach(t => { if (showTokens[t] && dp.tokens?.[t]) vals.push(dp.tokens[t].value); });
             }
         });
         return vals;
-    }, [enrichedData, showNav, showPools, pools, view]);
+    }, [enrichedData, showNav, showBtc, showPools, pools, showTokens, availableTokens, view]);
 
     const yMin = Math.min(...allValues, view === "pct" ? -1 : budget * 0.95);
     const yMax = Math.max(...allValues, view === "pct" ? 1 : budget * 1.05);
@@ -230,12 +284,7 @@ export default function PerformanceChart({ history }: { history: PerformanceHist
     const xTickFormatter = (idx: number) => {
         const dp = enrichedData[idx];
         if (!dp) return "";
-        // Show "Day N" for days > 0, "Start" only for index 0
-        if (dp.label === "Start") return "Start";
-        // Format as short date: "Mar 6"
-        try {
-            return new Date(dp.date + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-        } catch { return dp.label; }
+        return dp.label;
     };
 
     // Only show a tick for every Nth point to keep axis readable
@@ -284,14 +333,23 @@ export default function PerformanceChart({ history }: { history: PerformanceHist
             </div>
 
             {/* Controls */}
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 border-b border-[#272a35] bg-[#0a0a0c]">
-                <div className="flex flex-wrap items-center gap-1">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-3 md:px-4 py-3 md:py-2 border-b border-[#272a35] bg-[#0a0a0c]">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                     <SeriesToggle color={NAV_COLOR} label="Total NAV" active={showNav} onClick={() => setShowNav(v => !v)} />
+                    <SeriesToggle color="#f7931a" label="BTC" active={showBtc} onClick={() => setShowBtc(v => !v)} dashed />
+                    
                     {pools.map(p => (
-                        <SeriesToggle key={p.poolId} color={p.color} label={`${p.emoji} ${p.name}`}
+                        <SeriesToggle key={p.poolId} color={p.color} label={`${p.emoji} ${p.name.split(" ")[0]}`}
                             active={!!showPools[p.poolId]}
                             onClick={() => setShowPools(prev => ({ ...prev, [p.poolId]: !prev[p.poolId] }))} />
                     ))}
+
+                    {availableTokens.map(t => (
+                        <SeriesToggle key={t} color={tokenColors[t]} label={t}
+                            active={!!showTokens[t]}
+                            onClick={() => setShowTokens(prev => ({ ...prev, [t]: !prev[t] }))} />
+                    ))}
+                    
                     <SeriesToggle color="#6b7280" label="Trades" active={showTrades} onClick={() => setShowTrades(v => !v)} />
                 </div>
                 <div className="flex items-center border border-[#272a35]">
@@ -378,6 +436,39 @@ export default function PerformanceChart({ history }: { history: PerformanceHist
                                 connectNulls legendType="none" isAnimationActive animationDuration={800} animationEasing="ease-out" />
                         ) : null)}
 
+                        {/* BTC Line */}
+                        {showBtc && (
+                            <Line type="monotone"
+                                dataKey={(dp: any) => {
+                                    if (!dp.btcPrice) return null;
+                                    if (view === "abs") return null; // BTC is a benchmark % change
+                                    const firstBtcPoint = enrichedData.find(d => (d.btcPrice || 0) > 0);
+                                    if (!firstBtcPoint) return 0;
+                                    const firstBtc = firstBtcPoint.btcPrice || dp.btcPrice;
+                                    return ((dp.btcPrice - firstBtc) / firstBtc) * 100;
+                                }}
+                                name="BTC Benchmark" stroke="#f7931a" strokeWidth={1.5} strokeDasharray="5 2"
+                                dot={false} activeDot={{ r: 4, fill: "#f7931a" }}
+                                connectNulls legendType="none" isAnimationActive={false} />
+                        )}
+
+                        {/* Token Lines */}
+                        {availableTokens.map(t => showTokens[t] ? (
+                            <Line key={t} type="monotone"
+                                dataKey={(dp: any) => {
+                                    if (!dp.tokens?.[t]) return null;
+                                    if (view === "pct") {
+                                        const firstToken = enrichedData.find(d => d.tokens?.[t])?.tokens?.[t].price || dp.tokens[t].price;
+                                        return ((dp.tokens[t].price - firstToken) / firstToken) * 100;
+                                    }
+                                    return dp.tokens[t].value;
+                                }}
+                                name={t} stroke={tokenColors[t]} strokeWidth={1.5}
+                                dot={(dp: any) => <TailDot {...dp} stroke={tokenColors[t]} isLast={dp.index === lastIdx} />}
+                                activeDot={{ r: 4, fill: tokenColors[t] }}
+                                connectNulls legendType="none" isAnimationActive={false} />
+                        ) : null)}
+
                         {/* Total NAV line (on top) */}
                         {showNav && (
                             <Line type="monotone"
@@ -402,13 +493,13 @@ export default function PerformanceChart({ history }: { history: PerformanceHist
             </div>
 
             {/* Bottom stats bar */}
-            <div className="border-t border-[#272a35] bg-[#0a0a0c] px-4 py-2">
-                <div className="flex flex-wrap gap-4 items-center justify-between">
-                    <div className="flex flex-wrap gap-3">
+            <div className="border-t border-[#272a35] bg-[#0a0a0c] px-3 md:px-4 py-3 md:py-2">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-y-3 gap-x-4 items-start sm:items-center justify-between">
+                    <div className="grid grid-cols-2 md:flex md:flex-wrap gap-x-4 gap-y-2 w-full sm:w-auto">
                         {pools.map(p => (
                             <div key={p.poolId} className="flex items-center gap-1.5">
                                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
-                                <span className="font-mono text-[9px] text-[#8a8f98]">{p.emoji} {p.name.split(" ")[0]}</span>
+                                <span className="font-mono text-[9px] text-[#8a8f98] truncate">{p.emoji} {p.name.split(" ")[0]}</span>
                                 <span className={`font-mono text-[9px] font-bold ${p.currentPnlPct >= 0 ? "text-[#4caf50]" : "text-[#ff6659]"}`}>
                                     {fmtPct(p.currentPnlPct)}
                                 </span>

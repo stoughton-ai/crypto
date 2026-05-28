@@ -59,6 +59,7 @@ export interface CryptoAnalysisResult {
   verificationStatus: string;
   trafficLight: "RED" | "AMBER" | "GREEN";
   overallScore: number;
+  recommendedBuyAmountUsd?: number;
   signals: {
     name: string;
     category: "Fundamental" | "Technical" | "Sentiment" | "On-Chain";

@@ -2,16 +2,18 @@
 
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import ArenaDashboard from "@/components/ArenaDashboard";
 import MissionSelector from "@/components/MissionSelector";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Loader2, Zap, LogOut, Shield } from "lucide-react";
 import { getAllArenaStatuses } from "@/app/actions";
 
 export default function Home() {
   const { user, loading: authLoading, signInWithGoogle, logout } = useAuth();
+  const router = useRouter();
   const [isMobile, setIsMobile] = useState(false);
   const [missionCards, setMissionCards] = useState<any[]>([]);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
@@ -27,15 +29,21 @@ export default function Home() {
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
   }, [user]);
+  useEffect(() => {
+    if (user && missionCards.length > 0 && !isRedirecting) {
+      setIsRedirecting(true);
+      router.replace('/crypto');
+    }
+  }, [user, missionCards, router, isRedirecting]);
 
-
-  if (authLoading) {
+  if (authLoading || isRedirecting) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex flex-col items-center justify-center space-y-6">
         <div className="relative">
-          <div className="absolute inset-0 bg-indigo-500 blur-xl opacity-30 rounded-full animate-pulse-intense" />
-          <Loader2 className="animate-spin text-indigo-400 relative z-10" size={56} />
+          <div className="absolute inset-0 bg-[#4ba3e3] blur-3xl opacity-20 rounded-full animate-pulse" />
+          <Loader2 className="animate-spin text-[#4ba3e3] relative z-10" size={56} />
         </div>
+        <div className="mc-label text-[#8a8f98] animate-pulse">ESTABLISHING LINK TO MASTER PORTFOLIO...</div>
       </div>
     );
   }
@@ -57,11 +65,11 @@ export default function Home() {
           </div>
 
           <h1 className="text-5xl font-black font-outfit text-white mb-2 tracking-tight">
-            Semaphore <span className="text-gradient gradient-primary">Arena</span>
+            Semaphore
           </h1>
           <p className="font-outfit text-slate-400 mb-10 text-sm leading-relaxed tracking-wide opacity-80">
-            Autonomous trading competition platform.
-            <br />4 Pools. 8 Tokens. 28 Days.
+            AI-powered Master Portfolio & Monitoring.
+            <br />Revolut X · Crypto Forensics.
           </p>
 
           <button
@@ -85,27 +93,29 @@ export default function Home() {
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="flex justify-between items-center mb-8 flex-wrap gap-4"
+        className="flex justify-between items-center mb-6 md:mb-8 gap-2 md:gap-4"
       >
-        <div className="flex items-center gap-3 font-outfit text-xl font-bold tracking-tight text-white">
+        <div className="flex items-center gap-2 md:gap-3 font-outfit text-lg md:text-xl font-bold tracking-tight text-white shrink-0">
           <span className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.4)]">
             <Zap size={18} className="text-white" />
           </span>
           Semaphore
         </div>
 
-        <div className="flex items-center gap-3 premium-glass px-4 py-2.5 rounded-2xl">
-          <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-indigo-500/20 border border-indigo-500/40">
+        <div className="flex items-center gap-2 md:gap-3 premium-glass px-3 md:px-4 py-2 md:py-2.5 rounded-2xl min-w-0">
+          <div className="w-7 h-7 md:w-8 md:h-8 rounded-full overflow-hidden flex items-center justify-center bg-indigo-500/20 border border-indigo-500/40 shrink-0">
             {user.photoURL ? (
               <img src={user.photoURL} alt="" className="w-full h-full object-cover" />
             ) : (
-              <span className="text-xs font-bold text-indigo-300 font-outfit">{user.displayName?.[0] || '?'}</span>
+              <span className="text-[10px] md:text-xs font-bold text-indigo-300 font-outfit">{user.displayName?.[0] || '?'}</span>
             )}
           </div>
-          <span className="text-xs font-semibold text-slate-300 font-outfit tracking-wide">{user.displayName?.split(' ')[0]}</span>
-          <div className="w-px h-4 bg-white/10 mx-1" />
-          <button onClick={logout} className="text-[10px] font-bold text-slate-500 hover:text-rose-400 uppercase tracking-widest transition-colors flex items-center gap-1.5 font-outfit">
-            <LogOut size={12} /> Exit
+          <span className="text-[10px] md:text-xs font-semibold text-slate-300 font-outfit tracking-wide truncate">
+            {user.displayName?.split(' ')[0]}
+          </span>
+          <div className="w-px h-4 bg-white/10 mx-0 md:mx-1 shrink-0" />
+          <button onClick={logout} className="text-[9px] md:text-[10px] font-bold text-slate-500 hover:text-rose-400 uppercase tracking-widest transition-colors flex items-center gap-1 md:gap-1.5 font-outfit shrink-0">
+            <LogOut size={12} className="w-3 h-3 md:w-4 md:h-4" /> <span className="hidden sm:inline">Exit</span>
           </button>
         </div>
       </motion.div>
@@ -114,9 +124,6 @@ export default function Home() {
       {missionCards.length > 0 && (
         <MissionSelector cards={missionCards} />
       )}
-
-      {/* Main Crypto Arena Dashboard */}
-      <ArenaDashboard />
     </main>
   );
 }

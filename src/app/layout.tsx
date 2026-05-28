@@ -3,8 +3,8 @@ import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata: Metadata = {
-  title: "Semaphore Arena | AI Trading Terminal",
-  description: "Autonomous AI crypto trading arena. 4 competing pools. 28 days.",
+  title: "Semaphore | AI Trading Terminal",
+  description: "Autonomous AI trading platform. Multiple asset class arenas. GPM-powered.",
 };
 
 export const viewport: Viewport = {
