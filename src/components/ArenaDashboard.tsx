@@ -445,7 +445,7 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                                             <Shield size={16} />
                                         </div>
                                         <div className="flex flex-col">
-                                            <span className="mc-label text-xs tracking-widest">{pool.name}</span>
+                                            <span className="mc-label text-xs tracking-widest">{pool.tokens[0] ? `${pool.tokens[0]} PORTFOLIO` : pool.name}</span>
                                             <span className="text-[9px] text-[#555] font-mono uppercase tracking-[0.2em]">Synchronized // Revolut X uplink</span>
                                         </div>
                                     </div>

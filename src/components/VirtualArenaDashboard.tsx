@@ -420,8 +420,7 @@ export default function VirtualArenaDashboard({ userId: userIdProp }: { userId?:
                 </div>
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h3 className="font-bold text-lg text-white/90">{pool.name}</h3>
-                    <p className="text-xs text-zinc-500 uppercase tracking-widest mt-1">{pool.strategy.strategyPersonality} TRADER</p>
+                    <h3 className="font-bold text-lg text-white/90">{pool.tokens[0] ? `${pool.tokens[0]} PORTFOLIO` : pool.name}</h3>
                   </div>
                 </div>
                 
