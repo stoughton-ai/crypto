@@ -5741,12 +5741,28 @@ export async function syncMasterPortfolioFromRevolut(userId: string, arena: Aren
     const revolutUsd = primaryCashAccount ? parseFloat((primaryCashAccount.available ?? primaryCashAccount.balance ?? 0).toString()) : 0;
     
     // Map Revolut holdings: Ticker -> Amount
-    const revolutHoldingsMap: Record<string, number> = {};
+    // ⚠️ LIVE TRADING SCOPE: Only tokens in AGENT_WATCHLIST (XRP, AAVE) are managed
+    // by the AI. Any other Revolut holdings (personal BTC, ETH, etc.) are excluded
+    // to prevent the system from trading tokens outside its mandated scope.
+    const allRevolutBalances: Record<string, number> = {};
     for (const b of balances) {
       const sym = (b.currency ?? b.symbol ?? '').toUpperCase();
       if (!sym || sym === 'USD') continue;
       const amt = parseFloat((b.available ?? b.balance ?? 0).toString());
-      if (amt > 0) revolutHoldingsMap[sym] = amt;
+      if (amt > 0) allRevolutBalances[sym] = amt;
+    }
+
+    const revolutHoldingsMap: Record<string, number> = {};
+    const excludedTokens: string[] = [];
+    for (const [sym, amt] of Object.entries(allRevolutBalances)) {
+      if (AGENT_WATCHLIST.includes(sym)) {
+        revolutHoldingsMap[sym] = amt;
+      } else if (!['GBP', 'EUR', 'USD'].includes(sym) && !STABLECOIN_REJECT_LIST.includes(sym)) {
+        excludedTokens.push(sym);
+      }
+    }
+    if (excludedTokens.length > 0) {
+      console.log(`[MasterSync] 🚫 Excluded ${excludedTokens.length} non-watchlist token(s) from live portfolio: ${excludedTokens.join(', ')} (personal holdings — AI has no mandate to trade these).`);
     }
 
     // Target: POOL 1 as Master Portfolio
@@ -5806,7 +5822,7 @@ export async function syncMasterPortfolioFromRevolut(userId: string, arena: Aren
       // We no longer wipe holdings here to ensure manual acquisitions and prior gains are preserved
     }
 
-    console.log(`[MasterSync] 💼 Consolidated ${newTokens.length} tokens into Master Portfolio for user ${userId.substring(0, 8)}.`);
+    console.log(`[MasterSync] 💼 Consolidated ${newTokens.length} token(s) into Master Portfolio for user ${userId.substring(0, 8)}: ${newTokens.join(', ')} (watchlist-scoped).`);
   } catch (e: any) {
     console.error(`[MasterSync] revolut sync failed: ${e.message}`);
     throw new Error(`Revolut X sync failed: ${e.message}`);
