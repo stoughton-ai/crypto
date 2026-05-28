@@ -6369,9 +6369,25 @@ export async function toggleLiveTrading(userId: string, enabled: boolean): Promi
 
       await adminDb.collection('arena_config').doc(userId).set(arena);
     } else {
-      // When going back to sandbox/virtual, turn off real trading but keep sandbox settings
+      // When going back to sandbox, restore full pool configuration so both XRP and AAVE
+      // pools are ACTIVE and correctly named — undo the Master Portfolio / MOTHBALLED rename.
       arena.realTradingEnabled = false;
       arena.masterPortfolioMode = false;
+      arena.sellOnlyMode = false;
+
+      // Restore each pool to ACTIVE with its correct watchlist token
+      for (let i = 0; i < arena.pools.length; i++) {
+        const token = AGENT_WATCHLIST[i];
+        if (!token) continue;
+        arena.pools[i].status = 'ACTIVE';
+        arena.pools[i].name = `${token} Strategy`;
+        arena.pools[i].emoji = '📊';
+        // Ensure the token list always reflects the watchlist assignment
+        if (!arena.pools[i].tokens.includes(token)) {
+          arena.pools[i].tokens = [token];
+        }
+      }
+
       await adminDb.collection('arena_config').doc(userId).set(arena);
     }
 

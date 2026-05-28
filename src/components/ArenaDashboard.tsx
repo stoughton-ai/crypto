@@ -427,7 +427,7 @@ export default function ArenaDashboard({ userId: userIdProp, assetClass = 'CRYPT
                 </div>
 
                 <div className={`grid grid-cols-1 ${arena.masterPortfolioMode ? '' : 'md:grid-cols-2'} gap-6`}>
-                    {arena.pools.filter(p => p.status === 'ACTIVE').map(pool => {
+                    {arena.pools.filter(p => arena.masterPortfolioMode ? p.status === 'ACTIVE' : true).map(pool => {
                         const pv = poolValues.find(v => v.poolId === pool.poolId);
                         const isLeader = poolValues.indexOf(pv!) === leaderIdx;
                         const pnl = pv?.pnl ?? 0;
