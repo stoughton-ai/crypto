@@ -215,8 +215,6 @@ export default function VirtualArenaDashboard({ userId: userIdProp }: { userId?:
               {arena?.realTradingEnabled && (
                 <span className="block text-red-400 font-bold mt-1 animate-pulse">AI is executing live trades using Revolut X funds.</span>
               )}
-              <br />
-              Circuit breakers active at 10% (24h) and 25% (72h).
             </p>
           </div>
           
