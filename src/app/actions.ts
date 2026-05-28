@@ -3373,7 +3373,8 @@ export async function getPerformanceHistory(
     let portfolioValue = 0;
     let totalBaseOriginalBudget = 0;
     // Only include active, non-mothballed pools in the series calculation
-    const activePools = arena.pools.filter(p => p.status !== 'PAUSED' && p.name !== "MOTHBALLED STRATEGY");
+    // Active pools: all non-paused pools (name filter removed, pool status is the source of truth)
+    const activePools = arena.pools.filter(p => p.status !== 'PAUSED');
     
     for (const pool of activePools) {
       let value: number;
@@ -3508,7 +3509,7 @@ export async function getPerformanceHistory(
     : 0;
 
   const pools = arena.pools
-    .filter(p => p.status !== 'PAUSED' && p.name !== "MOTHBALLED STRATEGY")
+    .filter(p => p.status !== 'PAUSED')
     .map((pool, idx) => {
       let holdVal = 0;
       let holdCost = 0;
@@ -5765,64 +5766,64 @@ export async function syncMasterPortfolioFromRevolut(userId: string, arena: Aren
       console.log(`[MasterSync] 🚫 Excluded ${excludedTokens.length} non-watchlist token(s) from live portfolio: ${excludedTokens.join(', ')} (personal holdings — AI has no mandate to trade these).`);
     }
 
-    // Target: POOL 1 as Master Portfolio
-    const masterPool = arena.pools[0];
-    if (!masterPool) return;
-    
-    masterPool.name = "MASTER PORTFOLIO";
-    masterPool.emoji = "💼";
-    masterPool.status = 'ACTIVE';
+    // LIVE POOL ASSIGNMENT
+    // Each AGENT_WATCHLIST token gets its own dedicated pool:
+    //   Pool 0 -> AGENT_WATCHLIST[0] (XRP)  -> "XRP PORTFOLIO"
+    //   Pool 1 -> AGENT_WATCHLIST[1] (AAVE) -> "AAVE PORTFOLIO"
+    // Only the token assigned to that pool ever appears in its holdings box.
 
-    const newHoldings: Record<string, any> = {};
-    const newTokens: string[] = [];
-
-    // Find unseen tickers or existing tickers with a broken 0 cost basis
-    const tickersNeedingPrices = Object.keys(revolutHoldingsMap).filter(t => 
-        !masterPool.holdings[t] || !masterPool.holdings[t].averagePrice
-    );
+    // Pre-fetch prices for any tokens not yet priced in existing holdings
+    const allTokensNeedingPrices = AGENT_WATCHLIST.filter(t => {
+      const idx = AGENT_WATCHLIST.indexOf(t);
+      const pool = arena.pools[idx];
+      return !pool?.holdings[t]?.averagePrice;
+    });
     let livePrices: Record<string, { price: number }> = {};
-    if (tickersNeedingPrices.length > 0) {
-        livePrices = await getVerifiedPrices(tickersNeedingPrices, userId);
+    if (allTokensNeedingPrices.length > 0) {
+      livePrices = await getVerifiedPrices(allTokensNeedingPrices, userId);
     }
 
-    // Sync Master Pool holdings with Revolut
-    for (const [ticker, amount] of Object.entries(revolutHoldingsMap)) {
-      newTokens.push(ticker);
-      const existing = masterPool.holdings[ticker];
-      
-      if (existing) {
-        // Position still exists — update amount, preserve cost basis (for pnl tracking)
-        // If amount increased, could average up, but simplicity for now: keep existing avg.
-        // If average price was manually overridden or previously missing, fallback to live
-        const currentPrice = existing.averagePrice || livePrices[ticker]?.price || 0;
-        newHoldings[ticker] = { ...existing, amount, averagePrice: currentPrice };
-      } else {
-        // New position manually bought by user (or detected on Revolut)
-        // ANCHOR: Use current live price as initial cost basis + mark as userDirected
-        const livePrice = livePrices[ticker]?.price || 0;
-        newHoldings[ticker] = { 
-           amount, 
-           averagePrice: livePrice, 
-           peakPrice: livePrice, 
-           peakPnlPct: 0,
-           boughtAt: new Date().toISOString(),
-           userDirected: true
-        };
+    for (let i = 0; i < arena.pools.length; i++) {
+      const token = AGENT_WATCHLIST[i];
+      if (!token) {
+        // Extra pools beyond the watchlist -- hide them
+        arena.pools[i].status = 'PAUSED';
+        continue;
       }
+
+      const pool = arena.pools[i];
+      pool.name = `${token} PORTFOLIO`;
+      pool.emoji = '📊';
+      pool.status = 'ACTIVE';
+      pool.tokens = [token];
+
+      // Build holdings for only this pool's assigned token
+      const newHoldings: Record<string, any> = {};
+      const amount = revolutHoldingsMap[token];
+
+      if (amount !== undefined) {
+        const existing = pool.holdings[token];
+        if (existing) {
+          const currentPrice = existing.averagePrice || livePrices[token]?.price || 0;
+          newHoldings[token] = { ...existing, amount, averagePrice: currentPrice };
+        } else {
+          const livePrice = livePrices[token]?.price || 0;
+          newHoldings[token] = {
+            amount,
+            averagePrice: livePrice,
+            peakPrice: livePrice,
+            peakPnlPct: 0,
+            boughtAt: new Date().toISOString(),
+            userDirected: true,
+          };
+        }
+      }
+      // If token has no Revolut balance, the pool shows empty -- correct behaviour.
+      pool.holdings = newHoldings;
     }
 
-    masterPool.holdings = newHoldings;
-    masterPool.tokens = newTokens;
     arena.sharedCash = revolutUsd;
-
-    // Deactivate AI pools 2, 3, 4 (Pause only, preserve holdings/manual entries)
-    for (let i = 1; i < arena.pools.length; i++) {
-      arena.pools[i].status = 'PAUSED';
-      arena.pools[i].name = "MOTHBALLED STRATEGY";
-      // We no longer wipe holdings here to ensure manual acquisitions and prior gains are preserved
-    }
-
-    console.log(`[MasterSync] 💼 Consolidated ${newTokens.length} token(s) into Master Portfolio for user ${userId.substring(0, 8)}: ${newTokens.join(', ')} (watchlist-scoped).`);
+    console.log(`[MasterSync] 📊 Live pools assigned: ${AGENT_WATCHLIST.map((t, i) => `Pool${i}->${t}`).join(', ')}.`);
   } catch (e: any) {
     console.error(`[MasterSync] revolut sync failed: ${e.message}`);
     throw new Error(`Revolut X sync failed: ${e.message}`);
@@ -6380,7 +6381,7 @@ export async function toggleLiveTrading(userId: string, enabled: boolean): Promi
         const token = AGENT_WATCHLIST[i];
         if (!token) continue;
         arena.pools[i].status = 'ACTIVE';
-        arena.pools[i].name = `${token} Strategy`;
+        arena.pools[i].name = `${token} PORTFOLIO`;
         arena.pools[i].emoji = '📊';
         // Ensure the token list always reflects the watchlist assignment
         if (!arena.pools[i].tokens.includes(token)) {

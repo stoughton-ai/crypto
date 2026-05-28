@@ -200,7 +200,7 @@ export default function VirtualArenaDashboard({ userId: userIdProp }: { userId?:
           <div>
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-xl font-bold tracking-widest text-white flex items-center gap-2">
-                {arena?.realTradingEnabled ? 'Real Trading Profit Arena' : 'Virtual Profit Arena'}
+                {arena?.realTradingEnabled ? 'Real Trading Arena' : 'Virtual Profit Arena'}
               </h1>
               <span className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-wider ${
                 arena?.realTradingEnabled
@@ -213,7 +213,7 @@ export default function VirtualArenaDashboard({ userId: userIdProp }: { userId?:
             <p className="text-zinc-400 mt-2 text-sm max-w-xl font-mono leading-relaxed">
               Fully autonomous, high-frequency AI execution.
               {arena?.realTradingEnabled && (
-                <span className="block text-red-400 font-bold mt-1 animate-pulse">🚨 WARNING: AI is executing live trades using Revolut X funds.</span>
+                <span className="block text-red-400 font-bold mt-1 animate-pulse">AI is executing live trades using Revolut X funds.</span>
               )}
               <br />
               Circuit breakers active at 10% (24h) and 25% (72h).
